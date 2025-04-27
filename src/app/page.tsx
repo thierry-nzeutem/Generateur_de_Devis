@@ -2,8 +2,8 @@
 
 import * as React from 'react';
 import { useState, useEffect, useCallback } from 'react';
-import type { Service, Quote, QuoteInput, PricingVariable, Task, QuoteItemGroup } from '@/types';
-import { SERVICES, PRICING_VARIABLES, ALL_TASKS } from '@/config/services';
+import type { Service, Quote, QuoteInput, PricingVariable, Task, QuoteItemGroup, AppSettings } from '@/types'; // Added AppSettings
+import { SERVICES, PRICING_VARIABLES, ALL_TASKS, getCurrentComplexityFactors, getCurrentDistanceThresholds, getCurrentErpFactors, getCurrentFloorsNumberThresholds, getCurrentGroundAreaThresholds, getCurrentMainRoomsNumberThresholds, getCurrentMinMarginPercentage, getCurrentPricePerPage, getCurrentTaskPrices, getCurrentVatRate } from '@/config/services'; // Import current settings getters
 import { generateQuote, getApplicableVariables } from '@/lib/pricingEngine';
 
 import { Button } from '@/components/ui/button';
@@ -19,8 +19,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import Link from 'next/link'; // Import Link
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Added Tooltip
 
-import { FileText, Settings, Calculator, AlertTriangle, Euro, Percent, CheckCircle, ListChecks, Cog } from 'lucide-react'; // Added ListChecks, Cog
+import { FileText, Settings, Calculator, AlertTriangle, Euro, Percent, CheckCircle, ListChecks, Cog, Info } from 'lucide-react'; // Added ListChecks, Cog, Info
 
 export default function QuoteGeneratorPage() {
   // State for selected tasks (fine-grained control)
@@ -34,63 +35,71 @@ export default function QuoteGeneratorPage() {
         if (v.defaultValue !== undefined) {
             defaults[v.id] = v.defaultValue;
         }
+        // Initialize numeric fields even if no default to avoid uncontrolled components
+        if (v.type === 'number' && defaults[v.id] === undefined) {
+            defaults[v.id] = 0;
+        }
     });
     return defaults;
   });
   const [discount, setDiscount] = useState<number>(0);
   const [generatedQuote, setGeneratedQuote] = useState<Quote | null>(null);
-  const [applicableVariables, setApplicableVariables] = useState<PricingVariable[]>(PRICING_VARIABLES); // Initially all variables
+  // State to track applicable variables based on selection
+  const [applicableVariables, setApplicableVariables] = useState<PricingVariable[]>([]);
+  // State to hold current application settings (loaded once)
+  const [currentSettings, setCurrentSettings] = useState<Partial<AppSettings>>({}); // Use partial initially
 
   const { toast } = useToast();
 
-  // Derive selected services based on selected tasks for variable calculation
-  const derivedSelectedServices = useCallback(() => {
-      const serviceIds = new Set<string>();
-      SERVICES.forEach(service => {
-          const hasSelectedTask = Object.keys(service.tasks).some(taskId => selectedTasks[taskId]);
-          if (hasSelectedTask) {
-              serviceIds.add(service.id);
-          }
-      });
-      return SERVICES.filter(s => serviceIds.has(s.id));
-  }, [selectedTasks]);
+  // Load current settings from config/localStorage on mount
+   useEffect(() => {
+        // Only run on client-side
+       if (typeof window !== 'undefined') {
+           setCurrentSettings({
+               defaultVatRate: getCurrentVatRate(),
+               minMarginPercentage: getCurrentMinMarginPercentage(),
+               taskPrices: getCurrentTaskPrices(),
+               complexityFactors: getCurrentComplexityFactors(),
+               distanceThresholds: getCurrentDistanceThresholds(),
+               groundAreaThresholds: getCurrentGroundAreaThresholds(),
+               floorsNumberThresholds: getCurrentFloorsNumberThresholds(),
+               mainRoomsNumberThresholds: getCurrentMainRoomsNumberThresholds(),
+               erpFactors: getCurrentErpFactors(),
+               pricePerPage: getCurrentPricePerPage(),
+           });
 
+           // Load saved discount if exists
+            const storedDiscount = localStorage.getItem('defaultDiscount'); // Example storage key for user preference
+            if (storedDiscount) {
+                setDiscount(parseFloat(storedDiscount) || 0);
+            }
+
+            // Pre-fill inputs based on default variable values
+            const initialInputs: QuoteInput = {};
+             PRICING_VARIABLES.forEach(variable => {
+                 if (variable.defaultValue !== undefined) {
+                     initialInputs[variable.id] = variable.defaultValue;
+                 } else if (variable.type === 'number') {
+                     initialInputs[variable.id] = 0; // Ensure number inputs have a value
+                 } else if (variable.type === 'boolean') {
+                     initialInputs[variable.id] = false; // Ensure boolean inputs have a value
+                 }
+             });
+             setPricingInputs(initialInputs);
+       }
+   }, []); // Run only once on mount
+
+
+  // Update applicable variables whenever selected tasks change
   useEffect(() => {
-    // Update applicable variables whenever selected tasks change
-    setApplicableVariables(getApplicableVariables(derivedSelectedServices()));
+    const currentSelectedTaskIds = Object.entries(selectedTasks)
+        .filter(([_, isSelected]) => isSelected)
+        .map(([taskId]) => taskId);
+    setApplicableVariables(getApplicableVariables(currentSelectedTaskIds));
     // Reset quote when selections change
     setGeneratedQuote(null);
-  }, [selectedTasks, derivedSelectedServices]);
+  }, [selectedTasks]);
 
-   // Effect to load settings from localStorage on mount for initial state
-   useEffect(() => {
-    // Only run on client-side
-    if (typeof window !== 'undefined') {
-        const storedDiscount = localStorage.getItem('defaultDiscount'); // Example storage key
-        if (storedDiscount) {
-            setDiscount(parseFloat(storedDiscount) || 0);
-        }
-
-        // Load other settings affecting inputs if needed
-         PRICING_VARIABLES.forEach(variable => {
-             const storedValue = localStorage.getItem(variable.id); // Assuming settings use variable ID as key
-             if (storedValue !== null) {
-                 let value: string | number | boolean = storedValue;
-                 if (variable.type === 'number') {
-                     value = parseFloat(storedValue) || variable.defaultValue || 0;
-                 } else if (variable.type === 'boolean') {
-                     value = storedValue === 'true';
-                 }
-                 // Update if different from default
-                 if (pricingInputs[variable.id] !== value) {
-                    handleInputChange(variable.id, value);
-                 }
-
-             }
-         });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run only once on mount
 
   const handleServiceToggle = (serviceId: string, isChecked: boolean) => {
     const service = SERVICES.find(s => s.id === serviceId);
@@ -122,6 +131,7 @@ export default function QuoteGeneratorPage() {
     const service = SERVICES.find(s => s.id === serviceId);
     if (!service) return 'unchecked';
     const taskIds = Object.keys(service.tasks);
+    if (taskIds.length === 0) return 'unchecked'; // Handle empty service
     const selectedCount = taskIds.filter(taskId => selectedTasks[taskId]).length;
 
     if (selectedCount === 0) return 'unchecked';
@@ -131,10 +141,21 @@ export default function QuoteGeneratorPage() {
 
 
   const handleInputChange = (id: string, value: string | number | boolean) => {
-    setPricingInputs(prev => ({
-      ...prev,
-      [id]: value,
-    }));
+     // Find the variable definition to check type
+     const variableDef = PRICING_VARIABLES.find(v => v.id === id);
+
+    setPricingInputs(prev => {
+         let processedValue = value;
+         // Ensure numbers are stored as numbers, handle potential NaN from parseFloat
+         if (variableDef?.type === 'number') {
+             const numValue = typeof value === 'string' ? parseFloat(value) : value;
+             processedValue = isNaN(numValue as number) ? 0 : numValue; // Default to 0 if NaN
+         }
+        return {
+          ...prev,
+          [id]: processedValue,
+        }
+     });
     // Reset quote when inputs change
     setGeneratedQuote(null);
   };
@@ -160,8 +181,23 @@ export default function QuoteGeneratorPage() {
       return;
     }
 
+    // Basic validation: check if required applicable variables have values
+     const missingInputs = applicableVariables.filter(v =>
+         v.type === 'number' && (pricingInputs[v.id] === undefined || pricingInputs[v.id] === null || pricingInputs[v.id] === '')
+     );
+
+     if (missingInputs.length > 0) {
+         toast({
+             variant: "destructive",
+             title: "Variables manquantes",
+             description: `Veuillez renseigner les champs suivants: ${missingInputs.map(v => v.label).join(', ')}`,
+         });
+         return;
+     }
+
+
     try {
-        // Pass selected task IDs to the generation function
+        // Pass selected task IDs and current inputs to the generation function
         const quote = generateQuote(currentSelectedTaskIds, pricingInputs, discount);
         setGeneratedQuote(quote);
         toast({
@@ -178,7 +214,7 @@ export default function QuoteGeneratorPage() {
         toast({
             variant: "destructive",
             title: "Erreur de calcul",
-            description: "Une erreur est survenue lors de la génération du devis.",
+            description: `Une erreur est survenue lors de la génération du devis: ${error instanceof Error ? error.message : 'Erreur inconnue'}. Vérifiez la console pour plus de détails.`,
         });
     }
   };
@@ -187,6 +223,15 @@ export default function QuoteGeneratorPage() {
     if (amount === undefined) return '-';
     return amount.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
   };
+
+  // Sort applicable variables for consistent display order
+  const sortedApplicableVariables = [...applicableVariables].sort((a, b) => {
+       // Prioritize certain variables if needed, otherwise alphabetical
+       const order: { [key: string]: number } = {
+           distance: 1, groundArea: 2, floorsNumber: 3, mainRoomsNumber: 4, erpRanking: 5, complexity: 6, derogationsNumber: 7, copiesNumber: 8, needsPlans: 9
+       };
+       return (order[a.id] ?? 99) - (order[b.id] ?? 99) || a.label.localeCompare(b.label);
+   });
 
   return (
     <div className="container mx-auto p-4 md:p-8 bg-secondary min-h-screen">
@@ -197,7 +242,7 @@ export default function QuoteGeneratorPage() {
                         <FileText className="w-6 h-6" /> Prévéris - Générateur de Devis
                      </CardTitle>
                      <CardDescription>
-                        Sélectionnez les prestations et tâches, ajustez les variables et générez un devis détaillé.
+                        Sélectionnez les prestations et tâches, ajustez les variables et générez un devis détaillé. Les prix et calculs utilisent les <Link href="/settings" className="underline hover:text-primary">paramètres</Link> actuels.
                      </CardDescription>
                  </CardHeader>
             </Card>
@@ -276,12 +321,12 @@ export default function QuoteGeneratorPage() {
           <Card className="shadow-md">
             <CardHeader>
               <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Settings className="w-5 h-5 text-primary"/> Variables de Tarification
+                <Settings className="w-5 h-5 text-primary"/> Variables Applicables
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-               {applicableVariables.length > 0 ? (
-                applicableVariables.map((variable) => (
+               {sortedApplicableVariables.length > 0 ? (
+                sortedApplicableVariables.map((variable) => (
                   <div key={variable.id} className="space-y-1">
                     <Label htmlFor={variable.id} className="text-sm font-medium">
                       {variable.label} {variable.type === 'number' && variable.unit ? `(${variable.unit})` : ''}
@@ -289,19 +334,22 @@ export default function QuoteGeneratorPage() {
                     {variable.type === 'number' && (
                       <Input
                         id={variable.id}
+                        name={variable.id} // Add name attribute for form handling if needed later
                         type="number"
-                        value={pricingInputs[variable.id] as number ?? ''}
-                        onChange={(e) => handleInputChange(variable.id, parseFloat(e.target.value) || 0)}
+                        value={pricingInputs[variable.id] as number ?? 0} // Ensure value is number or 0
+                        onChange={(e) => handleInputChange(variable.id, e.target.value)} // Pass string value initially
                         placeholder={`Entrez ${variable.label.toLowerCase()}`}
                         min="0"
-                        step={variable.id === 'surface' ? '0.1' : '1'} // Example step control
+                        step={variable.id === 'surface' || variable.id === 'groundArea' ? '0.1' : '1'} // Example step control
                         className="text-sm"
+                        required // Mark number inputs as required?
                       />
                     )}
                     {variable.type === 'select' && variable.options && ( // Ensure options exist
                       <Select
                          value={(pricingInputs[variable.id] as string | undefined) ?? variable.defaultValue ?? variable.options[0]} // Ensure a valid value is selected
                          onValueChange={(value) => handleInputChange(variable.id, value)}
+                         name={variable.id} // Add name attribute
                       >
                         <SelectTrigger id={variable.id} className="w-full text-sm">
                           <SelectValue placeholder={`Sélectionnez ${variable.label.toLowerCase()}`} />
@@ -317,6 +365,7 @@ export default function QuoteGeneratorPage() {
                        <div className="flex items-center space-x-2 pt-1">
                          <Checkbox
                            id={variable.id}
+                           name={variable.id} // Add name attribute
                            checked={pricingInputs[variable.id] as boolean ?? false}
                            onCheckedChange={(checked) => handleInputChange(variable.id, !!checked)}
                          />
@@ -328,9 +377,10 @@ export default function QuoteGeneratorPage() {
                   </div>
                 ))
                ) : (
-                   <p className="text-sm text-muted-foreground text-center py-4">Aucune variable applicable aux tâches sélectionnées.</p>
+                    <p className="text-sm text-muted-foreground text-center py-4">Sélectionnez des tâches pour voir les variables applicables.</p>
                )}
-                 <div className="space-y-1 pt-2">
+                 <Separator className="my-4"/>
+                 <div className="space-y-1 pt-0">
                     <Label htmlFor="discount" className="text-sm font-medium flex items-center gap-1">
                         <Percent className="w-4 h-4" /> Remise (%)
                     </Label>
@@ -382,52 +432,69 @@ export default function QuoteGeneratorPage() {
                      </Alert>
                    )}
                    <ScrollArea className="h-[400px] border rounded-md">
-                     <Table>
-                       <TableHeader className="sticky top-0 bg-card z-10">
-                         <TableRow>
-                           <TableHead className="w-[60%]">Tâche / Prestation</TableHead>
-                           <TableHead className="text-right">Prix Unitaire HT</TableHead>
-                           <TableHead className="text-right">Total HT</TableHead>
-                         </TableRow>
-                       </TableHeader>
-                        {Object.values(generatedQuote.groupedItems).map((group: QuoteItemGroup) => (
-                           <TableBody key={group.serviceId}>
-                              {/* Service Header Row */}
-                              <TableRow className="bg-secondary hover:bg-secondary/90">
-                                  <TableCell colSpan={3} className="font-semibold text-primary py-2">
-                                      {group.serviceName}
-                                  </TableCell>
-                              </TableRow>
-                              {/* Task Rows */}
-                              {group.items.map((item) => (
-                                <TableRow key={item.id}>
-                                  <TableCell className="font-medium text-sm py-2 pl-6">{item.name}</TableCell>
-                                  <TableCell className="text-right text-sm py-2">{formatCurrency(item.unitPrice)}</TableCell>
-                                  <TableCell className="text-right text-sm py-2">{formatCurrency(item.totalPrice)}</TableCell>
-                                </TableRow>
-                              ))}
-                              {/* Service Subtotal Row */}
-                              <TableRow className="bg-secondary/50 hover:bg-secondary/70 border-t">
-                                  <TableCell colSpan={2} className="text-right font-semibold text-sm py-1 pr-2">
-                                      Sous-total {group.serviceName}
-                                  </TableCell>
-                                  <TableCell className="text-right font-semibold text-sm py-1">
-                                      {formatCurrency(group.subtotal)}
-                                  </TableCell>
-                              </TableRow>
-                           </TableBody>
-                       ))}
-                       {/* Display message if no items */}
-                       {Object.keys(generatedQuote.groupedItems).length === 0 && (
-                            <TableBody>
-                                <TableRow>
-                                    <TableCell colSpan={3} className="text-center text-muted-foreground py-4">
-                                    Aucune tâche chiffrée.
+                      <TooltipProvider>
+                       <Table>
+                         <TableHeader className="sticky top-0 bg-card z-10">
+                           <TableRow>
+                             <TableHead className="w-[55%]">Tâche / Prestation</TableHead>
+                             <TableHead className="w-[15%] text-center">Détails</TableHead>
+                             <TableHead className="text-right">Prix Unitaire HT</TableHead>
+                             <TableHead className="text-right">Total HT</TableHead>
+                           </TableRow>
+                         </TableHeader>
+                          {Object.values(generatedQuote.groupedItems).map((group: QuoteItemGroup) => (
+                             <TableBody key={group.serviceId}>
+                                {/* Service Header Row */}
+                                <TableRow className="bg-secondary hover:bg-secondary/90">
+                                    <TableCell colSpan={4} className="font-semibold text-primary py-2">
+                                        {group.serviceName}
                                     </TableCell>
                                 </TableRow>
-                           </TableBody>
-                       )}
-                     </Table>
+                                {/* Task Rows */}
+                                {group.items.map((item) => (
+                                  <TableRow key={item.id}>
+                                    <TableCell className="font-medium text-sm py-2 pl-6">{item.name}</TableCell>
+                                     <TableCell className="text-center text-xs text-muted-foreground py-2">
+                                        {item.details ? (
+                                             <Tooltip>
+                                                 <TooltipTrigger asChild>
+                                                     <span className='cursor-help'><Info size={14}/></span>
+                                                 </TooltipTrigger>
+                                                 <TooltipContent>
+                                                     <p>{item.details}</p>
+                                                 </TooltipContent>
+                                             </Tooltip>
+                                        ) : (
+                                            '-'
+                                        )}
+                                     </TableCell>
+                                    <TableCell className="text-right text-sm py-2">{formatCurrency(item.unitPrice)}</TableCell>
+                                    <TableCell className="text-right text-sm py-2">{formatCurrency(item.totalPrice)}</TableCell>
+                                  </TableRow>
+                                ))}
+                                {/* Service Subtotal Row */}
+                                <TableRow className="bg-secondary/50 hover:bg-secondary/70 border-t">
+                                    <TableCell colSpan={3} className="text-right font-semibold text-sm py-1 pr-2">
+                                        Sous-total {group.serviceName}
+                                    </TableCell>
+                                    <TableCell className="text-right font-semibold text-sm py-1">
+                                        {formatCurrency(group.subtotal)}
+                                    </TableCell>
+                                </TableRow>
+                             </TableBody>
+                         ))}
+                         {/* Display message if no items */}
+                         {Object.keys(generatedQuote.groupedItems).length === 0 && (
+                              <TableBody>
+                                  <TableRow>
+                                      <TableCell colSpan={4} className="text-center text-muted-foreground py-4">
+                                      Aucune tâche chiffrée.
+                                      </TableCell>
+                                  </TableRow>
+                             </TableBody>
+                         )}
+                       </Table>
+                     </TooltipProvider>
                    </ScrollArea>
 
                    <Separator />
@@ -472,7 +539,8 @@ export default function QuoteGeneratorPage() {
               ) : (
                 <div className="text-center text-muted-foreground py-10">
                   <Calculator className="mx-auto h-12 w-12 mb-4 text-gray-400" />
-                  <p>Veuillez sélectionner des tâches et cliquer sur "Calculer le Devis".</p>
+                  <p>Veuillez sélectionner des tâches et renseigner les variables applicables.</p>
+                  <p className="mt-2 text-xs">Cliquez sur "Calculer le Devis" pour générer un aperçu.</p>
                 </div>
               )}
             </CardContent>

@@ -32,7 +32,7 @@ export interface PricingVariableBase {
 
 export interface PricingVariableNumber extends PricingVariableBase {
     type: 'number';
-    unit?: string; // e.g., m², levels
+    unit?: string; // e.g., m², levels, km
     defaultValue?: number;
     modifier?: {
         type: 'per_unit' | 'fixed_offset'; // e.g., price per m², fixed addition/subtraction
@@ -75,6 +75,7 @@ export interface QuoteItem {
   quantity: number;
   unitPrice: number; // Calculated price per unit/task for this specific quote
   totalPrice: number;
+  details?: string; // Optional field for calculation details (e.g., pages for impression)
 }
 
 // Structure to hold grouped items in the quote
@@ -122,17 +123,30 @@ export interface ComplexityFactorSettings {
     Complexe: number;
 }
 
-// Example for a numerical variable modifier (surface area price per sqm)
-// This might be task-specific, so perhaps better linked within TaskPriceSettings
-// Or a general modifier applicable across tasks could be defined.
+// Structure for threshold settings
+export interface ThresholdSettings {
+    x: number; // Lower bound (exclusive)
+    y: number; // Upper bound (inclusive)
+    coeffX: number; // Coefficient if value < x
+    coeffXY: number; // Coefficient if x <= value <= y
+    coeffY: number; // Coefficient if value > y
+}
+
+// Structure for ERP Ranking factors
+export interface ErpFactorSettings {
+    [category: string]: number; // Map ERP ranking string to factor
+}
 
 export interface AppSettings {
   defaultVatRate: number;
   minMarginPercentage: number;
   taskPrices: TaskPriceSettings; // Store overridden task prices
-  // Add specific structures for other configurable variable modifiers as needed
-  // Example:
   complexityFactors: ComplexityFactorSettings;
-  // needsPlansCostFactor?: number; // Example: Factor applied if needsPlans is false
-  // ... other configurable modifiers
+  // New threshold settings
+  distanceThresholds: ThresholdSettings;
+  groundAreaThresholds: ThresholdSettings;
+  floorsNumberThresholds: ThresholdSettings;
+  mainRoomsNumberThresholds: ThresholdSettings;
+  erpFactors: ErpFactorSettings;
+  pricePerPage: number; // For printing cost
 }

@@ -8,11 +8,11 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
-import { ArrowLeft, Save, Settings as SettingsIcon, Cog, ListChecks, Euro, Percent } from 'lucide-react'; // Added more icons
+import { ArrowLeft, Save, Settings as SettingsIcon, Cog, ListChecks, Euro, Percent, MapPin, Maximize, Layers, Home, FileText } from 'lucide-react'; // Added more icons
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"; // Added Accordion
 import { ScrollArea } from '@/components/ui/scroll-area'; // Added ScrollArea
-import type { AppSettings, TaskPriceSettings, ComplexityFactorSettings, PricingVariable, PricingVariableSelect } from '@/types'; // Added necessary types
-import { ALL_TASKS, SERVICES, PRICING_VARIABLES, DEFAULT_VAT_RATE, DEFAULT_MIN_MARGIN_PERCENTAGE, DEFAULT_COMPLEXITY_FACTORS } from '@/config/services'; // Import defaults and config
+import type { AppSettings, TaskPriceSettings, ComplexityFactorSettings, PricingVariable, ThresholdSettings, ErpFactorSettings } from '@/types'; // Added necessary types
+import { ALL_TASKS, SERVICES, PRICING_VARIABLES, DEFAULT_VAT_RATE, DEFAULT_MIN_MARGIN_PERCENTAGE, DEFAULT_COMPLEXITY_FACTORS, DEFAULT_DISTANCE_THRESHOLDS, DEFAULT_GROUND_AREA_THRESHOLDS, DEFAULT_FLOORS_NUMBER_THRESHOLDS, DEFAULT_MAIN_ROOMS_NUMBER_THRESHOLDS, DEFAULT_ERP_FACTORS, DEFAULT_PRICE_PER_PAGE } from '@/config/services'; // Import defaults and config
 
 // Initial default state structure
 const getDefaultSettings = (): AppSettings => ({
@@ -20,13 +20,18 @@ const getDefaultSettings = (): AppSettings => ({
   minMarginPercentage: DEFAULT_MIN_MARGIN_PERCENTAGE,
   taskPrices: {}, // Initialize empty, will be populated with defaults/stored values
   complexityFactors: { ...DEFAULT_COMPLEXITY_FACTORS },
-  // Initialize other variable settings here if needed
+  distanceThresholds: { ...DEFAULT_DISTANCE_THRESHOLDS },
+  groundAreaThresholds: { ...DEFAULT_GROUND_AREA_THRESHOLDS },
+  floorsNumberThresholds: { ...DEFAULT_FLOORS_NUMBER_THRESHOLDS },
+  mainRoomsNumberThresholds: { ...DEFAULT_MAIN_ROOMS_NUMBER_THRESHOLDS },
+  erpFactors: { ...DEFAULT_ERP_FACTORS },
+  pricePerPage: DEFAULT_PRICE_PER_PAGE,
 });
 
 export default function SettingsPage() {
   const [settings, setSettings] = React.useState<AppSettings>(() => getDefaultSettings());
   const [isLoading, setIsLoading] = React.useState(true); // Simulate loading
-  const [openAccordions, setOpenAccordions] = React.useState<string[]>(['general', 'tasks']); // Default open accordions
+  const [openAccordions, setOpenAccordions] = React.useState<string[]>(['general', 'variables', 'tasks']); // Default open accordions
   const { toast } = useToast();
 
   // --- Load Settings ---
@@ -37,13 +42,25 @@ export default function SettingsPage() {
         const storedMargin = localStorage.getItem('minMarginPercentage');
         const storedTaskPrices = localStorage.getItem('taskPrices');
         const storedComplexity = localStorage.getItem('complexityFactors');
+        const storedDistanceTh = localStorage.getItem('distanceThresholds');
+        const storedAreaTh = localStorage.getItem('groundAreaThresholds');
+        const storedFloorsTh = localStorage.getItem('floorsNumberThresholds');
+        const storedRoomsTh = localStorage.getItem('mainRoomsNumberThresholds');
+        const storedErpFactors = localStorage.getItem('erpFactors');
+        const storedPricePerPage = localStorage.getItem('pricePerPage');
+
 
         const loadedSettings: AppSettings = {
           defaultVatRate: storedVat ? parseFloat(storedVat) : DEFAULT_VAT_RATE,
           minMarginPercentage: storedMargin ? parseFloat(storedMargin) : DEFAULT_MIN_MARGIN_PERCENTAGE,
           taskPrices: storedTaskPrices ? JSON.parse(storedTaskPrices) : {},
           complexityFactors: storedComplexity ? JSON.parse(storedComplexity) : { ...DEFAULT_COMPLEXITY_FACTORS },
-          // Load other settings here
+          distanceThresholds: storedDistanceTh ? JSON.parse(storedDistanceTh) : { ...DEFAULT_DISTANCE_THRESHOLDS },
+          groundAreaThresholds: storedAreaTh ? JSON.parse(storedAreaTh) : { ...DEFAULT_GROUND_AREA_THRESHOLDS },
+          floorsNumberThresholds: storedFloorsTh ? JSON.parse(storedFloorsTh) : { ...DEFAULT_FLOORS_NUMBER_THRESHOLDS },
+          mainRoomsNumberThresholds: storedRoomsTh ? JSON.parse(storedRoomsTh) : { ...DEFAULT_MAIN_ROOMS_NUMBER_THRESHOLDS },
+          erpFactors: storedErpFactors ? JSON.parse(storedErpFactors) : { ...DEFAULT_ERP_FACTORS },
+          pricePerPage: storedPricePerPage ? parseFloat(storedPricePerPage) : DEFAULT_PRICE_PER_PAGE,
         };
 
         // Populate taskPrices with defaults if not present in storage
@@ -78,11 +95,26 @@ export default function SettingsPage() {
 
   const handleGeneralSettingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
+    const numValue = parseFloat(value);
+     if (value !== '' && isNaN(numValue)) return; // Ignore invalid non-empty input
+
     setSettings(prev => ({
       ...prev,
-      [name]: parseFloat(value) || 0, // Ensure value is a number
+      [name]: value === '' ? undefined : numValue, // Allow empty input to potentially clear/reset later
     }));
   };
+
+   const handlePricePerPageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+       const { value } = e.target;
+       const numValue = parseFloat(value);
+       if (value !== '' && (isNaN(numValue) || numValue < 0)) return; // Ignore invalid non-empty input
+
+       setSettings(prev => ({
+           ...prev,
+           pricePerPage: value === '' ? DEFAULT_PRICE_PER_PAGE : numValue, // Reset to default if empty, otherwise set value
+       }));
+   };
+
 
   const handleTaskPriceChange = (taskId: string, field: 'unitPrice' | 'pricePerSqm', value: string) => {
      const numValue = value === '' ? undefined : parseFloat(value); // Allow empty input to clear value (will use default later)
@@ -102,7 +134,7 @@ export default function SettingsPage() {
 
     const handleComplexityFactorChange = (level: keyof ComplexityFactorSettings, value: string) => {
         const numValue = parseFloat(value);
-        if (isNaN(numValue)) return; // Ignore invalid input
+        if (isNaN(numValue) || numValue < 0) return; // Ignore invalid or negative input
 
         setSettings(prev => ({
             ...prev,
@@ -113,22 +145,71 @@ export default function SettingsPage() {
         }));
     };
 
+    const handleThresholdChange = (
+        thresholdType: keyof Pick<AppSettings, 'distanceThresholds' | 'groundAreaThresholds' | 'floorsNumberThresholds' | 'mainRoomsNumberThresholds'>,
+        field: keyof ThresholdSettings,
+        value: string
+    ) => {
+        const numValue = parseFloat(value);
+        if (isNaN(numValue) || numValue < 0) return; // Ignore invalid or negative input
+
+        setSettings(prev => ({
+            ...prev,
+            [thresholdType]: {
+                ...prev[thresholdType],
+                [field]: numValue,
+            }
+        }));
+    };
+
+    const handleErpFactorChange = (category: string, value: string) => {
+        const numValue = parseFloat(value);
+        if (isNaN(numValue) || numValue < 0) return; // Ignore invalid or negative input
+
+        setSettings(prev => ({
+            ...prev,
+            erpFactors: {
+                ...prev.erpFactors,
+                [category]: numValue,
+            },
+        }));
+    };
+
+
   // --- Save Settings ---
   const handleSaveSettings = () => {
     setIsLoading(true); // Show loading indicator
     try {
+      // Basic Validation (Example: ensure thresholds x < y) - More robust validation needed
+      const thresholdKeys: (keyof Pick<AppSettings, 'distanceThresholds' | 'groundAreaThresholds' | 'floorsNumberThresholds' | 'mainRoomsNumberThresholds'>)[] = ['distanceThresholds', 'groundAreaThresholds', 'floorsNumberThresholds', 'mainRoomsNumberThresholds'];
+      for (const key of thresholdKeys) {
+        if (settings[key].x >= settings[key].y) {
+          toast({ variant: "destructive", title: "Erreur de validation", description: `Le seuil X doit être inférieur au seuil Y pour ${getVariableLabel(key.replace('Thresholds', ''))}.` });
+          setIsLoading(false);
+          return;
+        }
+      }
+
       // Save general settings
       localStorage.setItem('defaultVatRate', settings.defaultVatRate.toString());
       localStorage.setItem('minMarginPercentage', settings.minMarginPercentage.toString());
+      localStorage.setItem('pricePerPage', settings.pricePerPage.toString());
 
-       // Save task prices (only store overrides, compare with defaults?)
-       // For simplicity, saving the whole structure including defaults if unchanged
+       // Save task prices
        localStorage.setItem('taskPrices', JSON.stringify(settings.taskPrices));
 
        // Save complexity factors
        localStorage.setItem('complexityFactors', JSON.stringify(settings.complexityFactors));
 
-      // Save other settings here
+       // Save thresholds
+       localStorage.setItem('distanceThresholds', JSON.stringify(settings.distanceThresholds));
+       localStorage.setItem('groundAreaThresholds', JSON.stringify(settings.groundAreaThresholds));
+       localStorage.setItem('floorsNumberThresholds', JSON.stringify(settings.floorsNumberThresholds));
+       localStorage.setItem('mainRoomsNumberThresholds', JSON.stringify(settings.mainRoomsNumberThresholds));
+
+       // Save ERP factors
+       localStorage.setItem('erpFactors', JSON.stringify(settings.erpFactors));
+
 
       toast({
         title: 'Paramètres sauvegardés',
@@ -155,6 +236,38 @@ export default function SettingsPage() {
    const getVariableLabel = (variableId: string): string => {
         return PRICING_VARIABLES.find(v => v.id === variableId)?.label ?? variableId;
     }
+
+    // Component for Threshold Input Card
+    const ThresholdInputCard = ({ title, icon: Icon, settingKey, unit }: { title: string, icon: React.ElementType, settingKey: keyof Pick<AppSettings, 'distanceThresholds' | 'groundAreaThresholds' | 'floorsNumberThresholds' | 'mainRoomsNumberThresholds'>, unit?: string }) => (
+         <Card className="border-dashed">
+             <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
+                 <div className='flex items-center gap-2'>
+                     <Icon className="w-4 h-4 text-muted-foreground" />
+                     <CardTitle className="text-base font-medium">{title}</CardTitle>
+                 </div>
+                 {unit && <span className="text-xs text-muted-foreground">({unit})</span>}
+             </CardHeader>
+             <CardContent className="grid grid-cols-1 sm:grid-cols-5 gap-x-4 gap-y-2 pt-2">
+                 {(Object.keys(settings[settingKey]) as Array<keyof ThresholdSettings>).map(field => (
+                     <div key={field} className="space-y-1">
+                         <Label htmlFor={`${settingKey}-${field}`} className="text-xs capitalize">
+                             {field === 'x' ? 'Seuil X' : field === 'y' ? 'Seuil Y' : `Coeff. ${field.replace('coeff','')}`}
+                         </Label>
+                         <Input
+                             id={`${settingKey}-${field}`}
+                             type="number"
+                             value={settings[settingKey][field]}
+                             onChange={(e) => handleThresholdChange(settingKey, field, e.target.value)}
+                             placeholder={field.startsWith('coeff') ? 'ex: 1.5' : 'ex: 100'}
+                             min="0"
+                             step={field.startsWith('coeff') ? "0.01" : "1"}
+                             className="text-sm h-9"
+                         />
+                     </div>
+                 ))}
+             </CardContent>
+         </Card>
+     );
 
 
   return (
@@ -206,7 +319,7 @@ export default function SettingsPage() {
                              id="defaultVatRate"
                              name="defaultVatRate"
                              type="number"
-                             value={settings.defaultVatRate}
+                             value={settings.defaultVatRate ?? ''}
                              onChange={handleGeneralSettingChange}
                              placeholder="ex: 20"
                              min="0"
@@ -228,7 +341,7 @@ export default function SettingsPage() {
                              id="minMarginPercentage"
                              name="minMarginPercentage"
                              type="number"
-                             value={settings.minMarginPercentage}
+                             value={settings.minMarginPercentage ?? ''}
                              onChange={handleGeneralSettingChange}
                              placeholder="ex: 30"
                              min="0"
@@ -237,6 +350,28 @@ export default function SettingsPage() {
                            />
                            <p className="text-sm text-muted-foreground">
                              Une alerte s'affichera si la marge estimée est inférieure.
+                           </p>
+                         </div>
+
+                         <Separator />
+
+                         <div className="space-y-2">
+                           <Label htmlFor="pricePerPage" className="text-base font-medium">
+                             Prix par page (impression) (€ HT)
+                           </Label>
+                           <Input
+                             id="pricePerPage"
+                             name="pricePerPage"
+                             type="number"
+                             value={settings.pricePerPage ?? ''}
+                             onChange={handlePricePerPageChange}
+                             placeholder={`ex: ${DEFAULT_PRICE_PER_PAGE}`}
+                             min="0"
+                             step="0.01"
+                             className="max-w-xs"
+                           />
+                           <p className="text-sm text-muted-foreground">
+                             Utilisé pour calculer le coût des tâches d'impression.
                            </p>
                          </div>
                     </AccordionContent>
@@ -251,24 +386,57 @@ export default function SettingsPage() {
                      </AccordionTrigger>
                      <AccordionContent className="px-6 pb-6 pt-2 space-y-6">
                           <p className="text-sm text-muted-foreground mb-4">
-                            Ajustez les modificateurs pour les variables de tarification sélectionnées.
+                            Ajustez les modificateurs pour les variables de tarification.
                           </p>
-                         {/* Complexity Factors Example */}
-                         <Card className="border-dashed">
+
+                          {/* --- Threshold Variables --- */}
+                         <ThresholdInputCard title="Distance Projet" icon={MapPin} settingKey="distanceThresholds" unit="km" />
+                         <ThresholdInputCard title="Superficie au sol" icon={Maximize} settingKey="groundAreaThresholds" unit="m²" />
+                         <ThresholdInputCard title="Nombre d'étages" icon={Layers} settingKey="floorsNumberThresholds" />
+                         <ThresholdInputCard title="Nombre de pièces principales" icon={Home} settingKey="mainRoomsNumberThresholds" />
+
+                          <Separator />
+
+                         {/* --- Factor Variables --- */}
+                          <Card className="border-dashed">
+                              <CardHeader className="pb-2">
+                                  <CardTitle className="text-base font-medium">{getVariableLabel('complexity')}</CardTitle>
+                                  <CardDescription className="text-xs">Facteurs multiplicateurs appliqués aux prix des tâches.</CardDescription>
+                              </CardHeader>
+                              <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                                  {(Object.keys(settings.complexityFactors) as Array<keyof ComplexityFactorSettings>).map(level => (
+                                       <div key={level} className="space-y-1">
+                                           <Label htmlFor={`complexity-${level}`} className="text-sm">{level}</Label>
+                                           <Input
+                                               id={`complexity-${level}`}
+                                               type="number"
+                                               value={settings.complexityFactors[level]}
+                                               onChange={(e) => handleComplexityFactorChange(level, e.target.value)}
+                                               placeholder="ex: 1.2"
+                                               min="0"
+                                               step="0.01"
+                                               className="text-sm h-9"
+                                           />
+                                       </div>
+                                  ))}
+                              </CardContent>
+                          </Card>
+
+                          <Card className="border-dashed">
                              <CardHeader className="pb-2">
-                                 <CardTitle className="text-base font-medium">{getVariableLabel('complexity')}</CardTitle>
-                                 <CardDescription className="text-xs">Facteurs multiplicateurs appliqués aux prix des tâches.</CardDescription>
+                                 <CardTitle className="text-base font-medium">{getVariableLabel('erpRanking')}</CardTitle>
+                                 <CardDescription className="text-xs">Facteurs multiplicateurs pour notices (sécurité/accessibilité).</CardDescription>
                              </CardHeader>
-                             <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                                 {(Object.keys(settings.complexityFactors) as Array<keyof ComplexityFactorSettings>).map(level => (
-                                      <div key={level} className="space-y-1">
-                                          <Label htmlFor={`complexity-${level}`} className="text-sm">{level}</Label>
+                             <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
+                                 {(Object.keys(settings.erpFactors) as Array<keyof ErpFactorSettings>).map(category => (
+                                      <div key={category} className="space-y-1">
+                                          <Label htmlFor={`erp-${category}`} className="text-sm truncate" title={category}>{category}</Label>
                                           <Input
-                                              id={`complexity-${level}`}
+                                              id={`erp-${category}`}
                                               type="number"
-                                              value={settings.complexityFactors[level]}
-                                              onChange={(e) => handleComplexityFactorChange(level, e.target.value)}
-                                              placeholder="ex: 1.2"
+                                              value={settings.erpFactors[category]}
+                                              onChange={(e) => handleErpFactorChange(category, e.target.value)}
+                                              placeholder="ex: 1.5"
                                               min="0"
                                               step="0.01"
                                               className="text-sm h-9"
@@ -276,19 +444,9 @@ export default function SettingsPage() {
                                       </div>
                                  ))}
                              </CardContent>
-                         </Card>
+                          </Card>
 
-                          {/* Add sections for other configurable variables here */}
-                          {/* e.g., ERP Category factors, Needs Plans cost adjustment, etc. */}
-                          {/* Example Placeholder:
-                           <Card className="border-dashed">
-                              <CardHeader className="pb-2">
-                                  <CardTitle className="text-base font-medium">{getVariableLabel('erpCategory')}</CardTitle>
-                                  <CardDescription className="text-xs">Modificateurs (facteur ou montant fixe).</CardDescription>
-                               </CardHeader>
-                              <CardContent> ... inputs ... </CardContent>
-                           </Card>
-                          */}
+
                      </AccordionContent>
                  </AccordionItem>
 
@@ -301,7 +459,7 @@ export default function SettingsPage() {
                      </AccordionTrigger>
                      <AccordionContent className="px-2 sm:px-6 pb-6 pt-2 space-y-4">
                          <p className="text-sm text-muted-foreground px-4 sm:px-0 mb-4">
-                             Définissez les prix unitaires de base (HT) et les coûts par m² pour chaque tâche. Laissez vide pour utiliser les valeurs par défaut de l'application (si définies).
+                             Définissez les prix unitaires de base (HT) pour chaque tâche. Laissez vide pour utiliser les valeurs par défaut de l'application. Les variables (distance, surface, etc.) s'appliqueront en plus de ce prix de base. Les tâches d'impression ont un prix calculé.
                          </p>
                         <ScrollArea className="h-[500px] pr-3">
                              <div className="space-y-3">
@@ -310,26 +468,36 @@ export default function SettingsPage() {
                                  .map(([taskId, prices]) => {
                                      const task = ALL_TASKS[taskId]; // Get task details for placeholders
                                      if (!task) return null; // Skip if task doesn't exist in config (safety check)
+                                     const isCalculatedTask = taskId.includes('impression') || taskId.includes('redaction_demande_derogation'); // Example of calculated tasks
 
                                      return (
-                                         <div key={taskId} className="p-3 border rounded-md bg-background/50 space-y-2">
-                                             <Label className="font-medium text-sm">{getTaskName(taskId)}</Label>
-                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                         <div key={taskId} className={`p-3 border rounded-md ${isCalculatedTask ? 'bg-muted/30 border-dashed' : 'bg-background/50'} space-y-2`}>
+                                             <Label className={`font-medium text-sm ${isCalculatedTask ? 'text-muted-foreground' : ''}`}>{getTaskName(taskId)}</Label>
+                                             <div className="grid grid-cols-1 gap-3">
                                                  <div className="space-y-1">
-                                                     <Label htmlFor={`task-${taskId}-unit`} className="text-xs text-muted-foreground flex items-center gap-1">
-                                                        <Euro className="w-3 h-3"/> Prix Unitaire (€ HT)
+                                                     <Label htmlFor={`task-${taskId}-unit`} className={`text-xs ${isCalculatedTask ? 'text-muted-foreground/70' : 'text-muted-foreground'} flex items-center gap-1`}>
+                                                        <Euro className="w-3 h-3"/> Prix Unitaire de Base (€ HT)
                                                      </Label>
                                                      <Input
                                                          id={`task-${taskId}-unit`}
                                                          type="number"
                                                          value={prices.unitPrice ?? ''} // Use empty string if undefined/null
                                                          onChange={(e) => handleTaskPriceChange(taskId, 'unitPrice', e.target.value)}
-                                                         placeholder={`Défaut: ${task.unitPrice ?? 'N/A'}`}
+                                                         placeholder={isCalculatedTask ? 'Calculé' : `Défaut: ${task.unitPrice ?? 'N/A'}`}
                                                          min="0"
                                                          step="0.1"
                                                          className="text-sm h-9"
+                                                         disabled={isCalculatedTask} // Disable input for calculated tasks
+                                                         readOnly={isCalculatedTask}
                                                      />
+                                                      {isCalculatedTask && (
+                                                        <p className="text-xs text-muted-foreground pt-1">
+                                                            {taskId.includes('impression') ? 'Prix calculé selon le nombre de pages/exemplaires et le prix par page.' : 'Prix calculé selon le nombre de dérogations.'}
+                                                        </p>
+                                                      )}
                                                  </div>
+                                                 {/* Hide pricePerSqm input for now as primary logic uses thresholds */}
+                                                 {/*
                                                  <div className="space-y-1">
                                                      <Label htmlFor={`task-${taskId}-sqm`} className="text-xs text-muted-foreground flex items-center gap-1">
                                                          <Euro className="w-3 h-3"/> Prix / m² (€ HT)
@@ -345,6 +513,7 @@ export default function SettingsPage() {
                                                          className="text-sm h-9"
                                                      />
                                                  </div>
+                                                  */}
                                              </div>
                                          </div>
                                      );
@@ -360,8 +529,8 @@ export default function SettingsPage() {
            {/* --- Save Button --- */}
            {!isLoading && (
                 <div className="flex justify-end pt-6">
-                    <Button onClick={handleSaveSettings} className="bg-primary hover:bg-primary/90">
-                        <Save className="mr-2 h-4 w-4" /> Sauvegarder les modifications
+                    <Button onClick={handleSaveSettings} className="bg-primary hover:bg-primary/90" disabled={isLoading}>
+                        <Save className="mr-2 h-4 w-4" /> {isLoading ? 'Sauvegarde...' : 'Sauvegarder les modifications'}
                     </Button>
                 </div>
            )}

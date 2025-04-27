@@ -1,4 +1,4 @@
-import type { Service, Task, PricingVariable, ComplexityFactorSettings } from '@/types';
+import type { Service, Task, PricingVariable, ComplexityFactorSettings, AppSettings, TaskPriceSettings, ThresholdSettings, ErpFactorSettings } from '@/types';
 
 // Define Tasks first (simplified for now, pricing logic needs detail)
 // Add default unitPrice/pricePerSqm where sensible as fallback/initial values
@@ -11,9 +11,9 @@ export const ALL_TASKS: Record<string, Task> = {
   redaction_notice_securite_at: { id: 'redaction_notice_securite_at', name: "Rédaction notice de sécurité (AT)", unitPrice: 400 },
   redaction_notice_accessibilite_at: { id: 'redaction_notice_accessibilite_at', name: "Rédaction notice d'accessibilité (AT)", unitPrice: 350 },
   redaction_demande_derogation_at: { id: 'redaction_demande_derogation_at', name: "Rédaction demande de dérogation (AT)", unitPrice: 200 },
-  renseignement_formulaire_cerfa_at: { id: 'renseignement_formulaire_cerfa_at', name: "Renseignement du formulaire cerfa (AT)", unitPrice: 100 },
-  impression_dossier_at: { id: 'impression_dossier_at', name: "Impression dossier (AT)", unitPrice: 50 }, // Example: Price might depend on pages
-  expedition_courrier_recommande_at: { id: 'expedition_courrier_recommande_at', name: "Expédition par courrier recommandé (AT)", unitPrice: 25 },
+  renseignement_formulaire_cerfa_at: { id: 'renseignement_formulaire_cerfa_at', name: "Renseignement du formulaire cerfa (AT)", unitPrice: 100 }, // Forfait fixe
+  impression_dossier_at: { id: 'impression_dossier_at', name: "Impression dossier (AT)", unitPrice: 0 }, // Price calculated based on pages
+  expedition_courrier_recommande_at: { id: 'expedition_courrier_recommande_at', name: "Expédition par courrier recommandé (AT)", unitPrice: 25 }, // Forfait fixe
   deplacement_preventionniste_at: { id: 'deplacement_preventionniste_at', name: "Déplacement préventionniste (AT)", unitPrice: 180 },
   relecture_annotation_plans_architecte_at: { id: 'relecture_annotation_plans_architecte_at', name: "Relecture et annotation des plans d'architecte (AT)", unitPrice: 200 },
 
@@ -28,19 +28,19 @@ export const ALL_TASKS: Record<string, Task> = {
   releve_geometrique_dp: { id: 'releve_geometrique_dp', name: "Relevé géométrique (DP)", unitPrice: 280, pricePerSqm: 1.3 },
   realisation_plans_existant_dp: { id: 'realisation_plans_existant_dp', name: "Réalisation des plans de l'existant (DP)", unitPrice: 230, pricePerSqm: 0.9 },
   realisation_plans_projet_dp: { id: 'realisation_plans_projet_dp', name: "Réalisation des plans à l'état projeté (DP)", unitPrice: 320, pricePerSqm: 1.1 },
-  renseignement_formulaire_cerfa_dp: { id: 'renseignement_formulaire_cerfa_dp', name: "Renseignement du formulaire cerfa (DP)", unitPrice: 90 },
-  impression_dossier_dp: { id: 'impression_dossier_dp', name: "Impression dossier (DP)", unitPrice: 45 },
-  expedition_courrier_recommande_dp: { id: 'expedition_courrier_recommande_dp', name: "Expédition par courrier recommandé (DP)", unitPrice: 25 },
+  renseignement_formulaire_cerfa_dp: { id: 'renseignement_formulaire_cerfa_dp', name: "Renseignement du formulaire cerfa (DP)", unitPrice: 90 }, // Forfait fixe
+  impression_dossier_dp: { id: 'impression_dossier_dp', name: "Impression dossier (DP)", unitPrice: 0 }, // Price calculated based on pages
+  expedition_courrier_recommande_dp: { id: 'expedition_courrier_recommande_dp', name: "Expédition par courrier recommandé (DP)", unitPrice: 25 }, // Forfait fixe
   realisation_reportage_photographique_dp: { id: 'realisation_reportage_photographique_dp', name: "Réalisation d'un reportage photographique (DP)", unitPrice: 150 },
-  realisation_photomontage_dp: { id: 'realisation_photomontage_dp', name: "Réalisation de photomontage (DP)", unitPrice: 200 }, // Example: Price might depend on complexity
+  realisation_photomontage_dp: { id: 'realisation_photomontage_dp', name: "Réalisation de photomontage (DP)", unitPrice: 200 },
 
   // Demande d'enseigne Tasks
   deplacement_architecte_enseigne: { id: 'deplacement_architecte_enseigne', name: "Déplacement Architecte (Enseigne)", unitPrice: 130 },
-  releve_geometrique_enseigne: { id: 'releve_geometrique_enseigne', name: "Relevé géométrique (Enseigne)", unitPrice: 250 }, // Example: Maybe not per sqm
+  releve_geometrique_enseigne: { id: 'releve_geometrique_enseigne', name: "Relevé géométrique (Enseigne)", unitPrice: 250 },
   realisation_plans_existant_enseigne: { id: 'realisation_plans_existant_enseigne', name: "Réalisation des plans de l'existant (Enseigne)", unitPrice: 200 },
-  renseignement_formulaire_cerfa_enseigne: { id: 'renseignement_formulaire_cerfa_enseigne', name: "Renseignement du formulaire cerfa (Enseigne)", unitPrice: 80 },
-  impression_dossier_enseigne: { id: 'impression_dossier_enseigne', name: "Impression dossier (Enseigne)", unitPrice: 40 },
-  expedition_courrier_recommande_enseigne: { id: 'expedition_courrier_recommande_enseigne', name: "Expédition par courrier recommandé (Enseigne)", unitPrice: 25 },
+  renseignement_formulaire_cerfa_enseigne: { id: 'renseignement_formulaire_cerfa_enseigne', name: "Renseignement du formulaire cerfa (Enseigne)", unitPrice: 80 }, // Forfait fixe
+  impression_dossier_enseigne: { id: 'impression_dossier_enseigne', name: "Impression dossier (Enseigne)", unitPrice: 0 }, // Price calculated based on pages
+  expedition_courrier_recommande_enseigne: { id: 'expedition_courrier_recommande_enseigne', name: "Expédition par courrier recommandé (Enseigne)", unitPrice: 25 }, // Forfait fixe
   realisation_photomontage_enseigne: { id: 'realisation_photomontage_enseigne', name: "Réalisation de photomontage (Enseigne)", unitPrice: 180 },
 
   // Audit sécurité Tasks
@@ -56,9 +56,9 @@ export const ALL_TASKS: Record<string, Task> = {
 
   // RUS Tasks
   deplacement_preventionniste_rus: { id: 'deplacement_preventionniste_rus', name: "Déplacement préventionniste (RUS)", unitPrice: 160 },
-  suivi_administratif_annuel_rus: { id: 'suivi_administratif_annuel_rus', name: "Suivi administratif annuel (RUS)", unitPrice: 400 }, // Example: Annual fee
+  suivi_administratif_annuel_rus: { id: 'suivi_administratif_annuel_rus', name: "Suivi administratif annuel (RUS)", unitPrice: 400 },
   visite_audit_rus: { id: 'visite_audit_rus', name: "Visite d'audit (RUS)", unitPrice: 250 },
-  responsabilite_juridique_rus: { id: 'responsabilite_juridique_rus', name: "Responsabilité juridique (RUS)", unitPrice: 1000 }, // Example: Higher stake
+  responsabilite_juridique_rus: { id: 'responsabilite_juridique_rus', name: "Responsabilité juridique (RUS)", unitPrice: 1000 },
   visa_rus: { id: 'visa_rus', name: "Visa du RUS", unitPrice: 50 },
 
   // Suivi d'établissement Tasks
@@ -71,11 +71,11 @@ export const ALL_TASKS: Record<string, Task> = {
   deplacement_architecte_plans: { id: 'deplacement_architecte_plans', name: "Déplacement Architecte (Plans)", unitPrice: 140 },
   releve_geometrique_plans: { id: 'releve_geometrique_plans', name: "Relevé géométrique (Plans)", unitPrice: 270, pricePerSqm: 1.2 },
   realisation_plans_existant_plans: { id: 'realisation_plans_existant_plans', name: "Réalisation des plans de l'existant (Plans)", unitPrice: 220, pricePerSqm: 0.8 },
-  realisation_plan_intervention: { id: 'realisation_plan_intervention', name: "Réalisation plan d'intervention", unitPrice: 150 }, // Per plan?
-  realisation_plan_evacuation: { id: 'realisation_plan_evacuation', name: "Réalisation plan d'évacuation", unitPrice: 150 }, // Per plan?
-  realisation_plan_chambre: { id: 'realisation_plan_chambre', name: "Réalisation plan de chambre", unitPrice: 80 }, // Per plan/room?
+  realisation_plan_intervention: { id: 'realisation_plan_intervention', name: "Réalisation plan d'intervention", unitPrice: 150 },
+  realisation_plan_evacuation: { id: 'realisation_plan_evacuation', name: "Réalisation plan d'évacuation", unitPrice: 150 },
+  realisation_plan_chambre: { id: 'realisation_plan_chambre', name: "Réalisation plan de chambre", unitPrice: 80 },
   fourniture_cadres_clic_clac: { id: 'fourniture_cadres_clic_clac', name: "Fourniture cadres clic-clac", unitPrice: 30 }, // Per frame
-  impression_plans: { id: 'impression_plans', name: "Impression (suivant format et supports)", unitPrice: 20 }, // Per plan/page? Variable?
+  impression_plans: { id: 'impression_plans', name: "Impression (suivant format et supports)", unitPrice: 0 }, // Price calculated based on pages
   expedition_chronopost_plans: { id: 'expedition_chronopost_plans', name: "Expédition chronopost (Plans)", unitPrice: 40 },
 
   // Avis sur dossier ERP 5 Tasks
@@ -84,16 +84,16 @@ export const ALL_TASKS: Record<string, Task> = {
 
   // CSSI Coordination SSI Tasks
   cssi_phase_conception: { id: 'cssi_phase_conception', name: "CSSI Phase Conception", unitPrice: 600 },
-  cssi_phase_realisation: { id: 'cssi_phase_realisation', name: "CSSI Phase Réalisation", unitPrice: 800 }, // Example: Might be % of works
+  cssi_phase_realisation: { id: 'cssi_phase_realisation', name: "CSSI Phase Réalisation", unitPrice: 800 },
   cssi_phase_reception: { id: 'cssi_phase_reception', name: "CSSI Phase Réception", unitPrice: 400 },
 
   // Maintenance Moyen de secours Tasks
   deplacement_technicien_maint: { id: 'deplacement_technicien_maint', name: "Déplacement technicien (Maintenance)", unitPrice: 120 },
-  maintenance_annuelle_alarme: { id: 'maintenance_annuelle_alarme', name: "Maintenance annuelle équipement d'alarme", unitPrice: 200 }, // Per system?
-  maintenance_annuelle_ria: { id: 'maintenance_annuelle_ria', name: "Maintenance annuelle RIA", unitPrice: 50 }, // Per RIA?
-  maintenance_annuelle_extincteur: { id: 'maintenance_annuelle_extincteur', name: "Maintenance annuelle Extincteur", unitPrice: 15 }, // Per extinguisher?
-  maintenance_annuelle_eclairage: { id: 'maintenance_annuelle_eclairage', name: "Maintenance annuelle éclairage de sécurité", unitPrice: 5 }, // Per unit?
-  maintenance_annuelle_poteaux: { id: 'maintenance_annuelle_poteaux', name: "Maintenance annuelle poteaux et bouche", unitPrice: 80 }, // Per hydrant?
+  maintenance_annuelle_alarme: { id: 'maintenance_annuelle_alarme', name: "Maintenance annuelle équipement d'alarme", unitPrice: 200 },
+  maintenance_annuelle_ria: { id: 'maintenance_annuelle_ria', name: "Maintenance annuelle RIA", unitPrice: 50 },
+  maintenance_annuelle_extincteur: { id: 'maintenance_annuelle_extincteur', name: "Maintenance annuelle Extincteur", unitPrice: 15 },
+  maintenance_annuelle_eclairage: { id: 'maintenance_annuelle_eclairage', name: "Maintenance annuelle éclairage de sécurité", unitPrice: 5 },
+  maintenance_annuelle_poteaux: { id: 'maintenance_annuelle_poteaux', name: "Maintenance annuelle poteaux et bouche", unitPrice: 80 },
 
 };
 
@@ -207,8 +207,8 @@ export const SERVICES: Service[] = [
         realisation_plan_evacuation: true,
         realisation_plan_chambre: true,
         fourniture_cadres_clic_clac: true,
-        impression_plans: true,
-        expedition_chronopost_plans: true,
+        impression_plans: true, // Calculated price
+        expedition_chronopost_plans: true, // Fixed price
     },
   },
   {
@@ -247,57 +247,99 @@ export const SERVICES: Service[] = [
 // Add modifier configurations where applicable
 export const PRICING_VARIABLES: PricingVariable[] = [
     {
-        id: 'surface',
-        label: 'Surface',
+        id: 'surface', // Legacy 'surface', might deprecate if groundArea is preferred
+        label: 'Surface (Ancien)',
         type: 'number',
         unit: 'm²',
         defaultValue: 100,
-        // Example modifier: Rate per square meter (applied in calculateTaskPrice logic)
-        // The actual application logic is in pricingEngine.ts
-        // modifier: { type: 'per_unit', value: 1.0 } // Value might vary per task
     },
     {
-        id: 'erpCategory',
-        label: 'Catégorie ERP',
+        id: 'erpCategory', // Legacy 'erpCategory', might deprecate if erpRanking is preferred
+        label: 'Catégorie ERP (Ancien)',
         type: 'select',
         options: ['1', '2', '3', '4', '5'],
         defaultValue: '5',
-        // Example: Price might increase for lower category numbers (higher risk/complexity)
-        // modifier: { type: 'factor', values: {'1': 1.5, '2': 1.3, '3': 1.1, '4': 1.0, '5': 0.9 } }
     },
     {
-        id: 'levels',
-        label: 'Nombre de niveaux',
+        id: 'levels', // Legacy 'levels', might deprecate if floorsNumber is preferred
+        label: 'Nombre de niveaux (Ancien)',
         type: 'number',
         defaultValue: 1,
-        // Example: Price might increase slightly per level
-        // modifier: { type: 'per_unit', value: 50 } // Flat €50 extra per level? Or factor?
     },
     {
-        id: 'cells',
-        label: 'Nombre de cellules',
+        id: 'cells', // Legacy 'cells', might deprecate if mainRoomsNumber is preferred
+        label: 'Nombre de cellules (Ancien)',
         type: 'number',
         defaultValue: 1,
-        // Example: Relevant for specific tasks like RUS or Audits in large spaces
     },
     {
         id: 'needsPlans',
         label: 'Besoin de réalisation de plans',
         type: 'boolean',
         defaultValue: true,
-        // Example: Disables certain tasks if false (handled in pricingEngine.ts)
-        // modifier: { type: 'enable_disable' }
+        modifier: { type: 'enable_disable' }
+    },
+     {
+        id: 'distance',
+        label: 'Distance du projet',
+        type: 'number',
+        unit: 'km',
+        defaultValue: 50, // Example default
     },
     {
-        id: 'complexity',
+        id: 'groundArea',
+        label: 'Superficie au sol',
+        type: 'number',
+        unit: 'm²',
+        defaultValue: 100, // Example default
+    },
+    {
+        id: 'floorsNumber',
+        label: 'Nombre d\'étages',
+        type: 'number',
+        defaultValue: 1, // Example default
+    },
+    {
+        id: 'mainRoomsNumber',
+        label: 'Nombre de pièces principales',
+        type: 'number',
+        defaultValue: 5, // Example default
+    },
+    {
+        id: 'erpRanking',
+        label: 'Classement de l\'ERP',
+        type: 'select',
+        options: [
+            '5ᵉ catégorie sans locaux à sommeil et moins de 20 personnes',
+            '5ᵉ catégorie autres',
+            '4ᵉ catégorie',
+            '3ᵉ catégorie',
+            '2ᵉ catégorie',
+            '1ʳᵉ catégorie'
+        ],
+        defaultValue: '5ᵉ catégorie sans locaux à sommeil et moins de 20 personnes',
+        // Modifier now defined in settings (DEFAULT_ERP_FACTORS)
+    },
+    {
+        id: 'derogationsNumber',
+        label: 'Nombre de dérogations',
+        type: 'number',
+        defaultValue: 0, // Default to 0 derogations
+    },
+    {
+        id: 'complexity', // Keep complexity as it's used
         label: 'Complexité',
         type: 'select',
         options: ['Simple', 'Moyenne', 'Complexe'],
         defaultValue: 'Simple',
-        // Modifier defines the factor applied based on selection
-        modifier: { type: 'factor', values: {'Simple': 1.0, 'Moyenne': 1.2, 'Complexe': 1.5 } }
+        // Modifier now defined in settings (DEFAULT_COMPLEXITY_FACTORS)
     },
-    // Add more variables as needed
+    {
+        id: 'copiesNumber', // Variable for number of copies for printing
+        label: 'Nombre d\'exemplaires (impression)',
+        type: 'number',
+        defaultValue: 3, // Default number of copies
+    },
 ];
 
 // --- Default Settings ---
@@ -341,6 +383,24 @@ export const DEFAULT_COMPLEXITY_FACTORS: ComplexityFactorSettings = {
   Complexe: 1.5,
 };
 
+// Define default threshold settings
+export const DEFAULT_DISTANCE_THRESHOLDS: ThresholdSettings = { x: 50, y: 100, coeffX: 1, coeffXY: 1.5, coeffY: 2 };
+export const DEFAULT_GROUND_AREA_THRESHOLDS: ThresholdSettings = { x: 100, y: 500, coeffX: 1, coeffXY: 1.5, coeffY: 2 };
+export const DEFAULT_FLOORS_NUMBER_THRESHOLDS: ThresholdSettings = { x: 3, y: 7, coeffX: 1, coeffXY: 1.5, coeffY: 2 };
+export const DEFAULT_MAIN_ROOMS_NUMBER_THRESHOLDS: ThresholdSettings = { x: 10, y: 30, coeffX: 1, coeffXY: 1.5, coeffY: 2 };
+
+// Define default ERP factors
+export const DEFAULT_ERP_FACTORS: ErpFactorSettings = {
+    '5ᵉ catégorie sans locaux à sommeil et moins de 20 personnes': 1, // Base
+    '5ᵉ catégorie autres': 1.2, // Intermédiaire
+    '4ᵉ catégorie': 1.5, // Plus élevé
+    '3ᵉ catégorie': 1.5, // Plus élevé
+    '2ᵉ catégorie': 1.5, // Plus élevé
+    '1ʳᵉ catégorie': 2.0, // Maximum
+};
+
+// Define default price per page for printing
+export const DEFAULT_PRICE_PER_PAGE: number = 0.10; // Example: 10 cents per page
 
 // Function to get the current VAT rate (checks localStorage first)
 export const getCurrentVatRate = (): number => getStoredNumber('defaultVatRate', DEFAULT_VAT_RATE);
@@ -385,3 +445,15 @@ export const getCurrentTaskPrices = (): Record<string, { unitPrice?: number; pri
 
     return currentPrices;
 };
+
+// Functions to get current threshold settings
+export const getCurrentDistanceThresholds = (): ThresholdSettings => getStoredJson<ThresholdSettings>('distanceThresholds', DEFAULT_DISTANCE_THRESHOLDS);
+export const getCurrentGroundAreaThresholds = (): ThresholdSettings => getStoredJson<ThresholdSettings>('groundAreaThresholds', DEFAULT_GROUND_AREA_THRESHOLDS);
+export const getCurrentFloorsNumberThresholds = (): ThresholdSettings => getStoredJson<ThresholdSettings>('floorsNumberThresholds', DEFAULT_FLOORS_NUMBER_THRESHOLDS);
+export const getCurrentMainRoomsNumberThresholds = (): ThresholdSettings => getStoredJson<ThresholdSettings>('mainRoomsNumberThresholds', DEFAULT_MAIN_ROOMS_NUMBER_THRESHOLDS);
+
+// Function to get current ERP factors
+export const getCurrentErpFactors = (): ErpFactorSettings => getStoredJson<ErpFactorSettings>('erpFactors', DEFAULT_ERP_FACTORS);
+
+// Function to get current price per page
+export const getCurrentPricePerPage = (): number => getStoredNumber('pricePerPage', DEFAULT_PRICE_PER_PAGE);

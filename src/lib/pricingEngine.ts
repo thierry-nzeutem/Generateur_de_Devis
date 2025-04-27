@@ -1,71 +1,148 @@
-import type { Quote, QuoteInput, QuoteItem, Service, Task, PricingVariable, QuoteItemGroup, AppSettings, ComplexityFactorSettings, TaskPriceSettings } from '@/types';
+import type { Quote, QuoteInput, QuoteItem, Service, Task, PricingVariable, QuoteItemGroup, AppSettings, ComplexityFactorSettings, TaskPriceSettings, ThresholdSettings, ErpFactorSettings } from '@/types';
 import {
     ALL_TASKS,
     SERVICES,
     PRICING_VARIABLES,
-    getCurrentVatRate, // Use function to get current rate
-    getCurrentMinMarginPercentage, // Use function to get current rate
-    getCurrentTaskPrices, // Use function to get current task prices
-    getCurrentComplexityFactors, // Use function to get current factors
+    getCurrentVatRate,
+    getCurrentMinMarginPercentage,
+    getCurrentTaskPrices,
+    getCurrentComplexityFactors,
+    getCurrentDistanceThresholds,
+    getCurrentGroundAreaThresholds,
+    getCurrentFloorsNumberThresholds,
+    getCurrentMainRoomsNumberThresholds,
+    getCurrentErpFactors,
+    getCurrentPricePerPage,
 } from '@/config/services';
 import { v4 as uuidv4 } from 'uuid'; // Use UUID for unique quote IDs
 
+// Helper function to get threshold coefficient
+const getThresholdCoefficient = (value: number, thresholds: ThresholdSettings): number => {
+    if (value < thresholds.x) return thresholds.coeffX;
+    if (value >= thresholds.x && value <= thresholds.y) return thresholds.coeffXY;
+    return thresholds.coeffY; // value > y
+};
 
 // --- Pricing Logic using Settings ---
 
-const calculateTaskPrice = (taskId: string, inputs: QuoteInput, taskPrices: TaskPriceSettings, complexityFactors: ComplexityFactorSettings): number => {
+const calculateTaskPrice = (
+    taskId: string,
+    inputs: QuoteInput,
+    taskPrices: TaskPriceSettings,
+    complexityFactors: ComplexityFactorSettings,
+    distanceThresholds: ThresholdSettings,
+    groundAreaThresholds: ThresholdSettings,
+    floorsNumberThresholds: ThresholdSettings,
+    mainRoomsNumberThresholds: ThresholdSettings,
+    erpFactors: ErpFactorSettings,
+    pricePerPage: number
+): { price: number; details?: string } => {
     const task = ALL_TASKS[taskId];
-    if (!task) return 0;
+    if (!task) return { price: 0 };
 
     // Get base prices from current settings (which fall back to defaults if not set)
     const currentTaskSettings = taskPrices[taskId] || {};
-    const baseUnitPrice = currentTaskSettings.unitPrice ?? task.unitPrice ?? 0;
-    const basePricePerSqm = currentTaskSettings.pricePerSqm ?? task.pricePerSqm ?? 0;
+    let baseUnitPrice = currentTaskSettings.unitPrice ?? task.unitPrice ?? 0;
+    const basePricePerSqm = currentTaskSettings.pricePerSqm ?? task.pricePerSqm ?? 0; // Keep this for specific tasks if needed
 
     let calculatedPrice = baseUnitPrice;
+    let details: string | undefined = undefined;
 
-    // Apply price per sqm if applicable and surface is provided
-    if (basePricePerSqm > 0 && inputs.surface && typeof inputs.surface === 'number') {
-        calculatedPrice += inputs.surface * basePricePerSqm;
+    // --- Apply Specific Variable Logic ---
+
+    // 1. Distance Coefficient (Affects 'deplacement_' tasks)
+    if (taskId.includes('deplacement_') && typeof inputs.distance === 'number') {
+        const distanceCoeff = getThresholdCoefficient(inputs.distance, distanceThresholds);
+        calculatedPrice *= distanceCoeff;
     }
 
-    // Apply complexity factor using current settings
+    // 2. Ground Area Coefficient (Affects releve_geometrique, realisation_plans_existant, realisation_plans_projet)
+    if (
+        (taskId.includes('releve_geometrique') || taskId.includes('realisation_plans_existant') || taskId.includes('realisation_plans_projet')) &&
+        typeof inputs.groundArea === 'number'
+    ) {
+        const areaCoeff = getThresholdCoefficient(inputs.groundArea, groundAreaThresholds);
+        calculatedPrice *= areaCoeff;
+    }
+
+    // 3. Floors Number Coefficient (Affects releve_geometrique, realisation_plans_existant, realisation_plans_projet)
+     if (
+        (taskId.includes('releve_geometrique') || taskId.includes('realisation_plans_existant') || taskId.includes('realisation_plans_projet')) &&
+        typeof inputs.floorsNumber === 'number'
+    ) {
+        const floorsCoeff = getThresholdCoefficient(inputs.floorsNumber, floorsNumberThresholds);
+        calculatedPrice *= floorsCoeff;
+    }
+
+     // 4. Main Rooms Number Coefficient (Affects releve_geometrique, realisation_plans_existant, realisation_plans_projet)
+     if (
+        (taskId.includes('releve_geometrique') || taskId.includes('realisation_plans_existant') || taskId.includes('realisation_plans_projet')) &&
+        typeof inputs.mainRoomsNumber === 'number'
+    ) {
+        const roomsCoeff = getThresholdCoefficient(inputs.mainRoomsNumber, mainRoomsNumberThresholds);
+        calculatedPrice *= roomsCoeff;
+    }
+
+    // 5. ERP Ranking Factor (Affects redaction_notice_securite, redaction_notice_accessibilite)
+    if (
+        (taskId.includes('redaction_notice_securite') || taskId.includes('redaction_notice_accessibilite')) &&
+        typeof inputs.erpRanking === 'string'
+    ) {
+        const erpFactor = erpFactors[inputs.erpRanking] ?? 1.0; // Default to 1 if category not found
+        calculatedPrice *= erpFactor;
+    }
+
+    // 6. Derogations Number (Affects redaction_demande_derogation)
+    if (taskId.includes('redaction_demande_derogation') && typeof inputs.derogationsNumber === 'number' && inputs.derogationsNumber > 0) {
+        calculatedPrice *= inputs.derogationsNumber; // Base price * number of derogations
+    }
+
+    // 7. Cerfa (Fixed price - no variable impact other than base price)
+    if (taskId.includes('renseignement_formulaire_cerfa')) {
+        // Price is already set by baseUnitPrice
+    }
+
+    // 8. Impression & Expedition
+    if (taskId.includes('impression_dossier') || taskId.includes('impression_plans')) {
+        const floors = typeof inputs.floorsNumber === 'number' ? inputs.floorsNumber : 1;
+        const pages = 3 + (2 * Math.max(0, floors)); // Calculate pages
+        const copies = typeof inputs.copiesNumber === 'number' ? inputs.copiesNumber : 3; // Default 3 copies
+        calculatedPrice = pages * pricePerPage * copies;
+        details = `${pages} pages x ${copies} ex.`;
+    }
+    if (taskId.includes('expedition_courrier_recommande') || taskId.includes('expedition_chronopost')) {
+        // Price is fixed by baseUnitPrice
+    }
+
+    // Apply General Complexity Factor (if not handled by specific rules above)
+    // Note: Decide if complexity should stack with other factors or be applied selectively.
+    // For now, let's apply it multiplicatively to the result of other calculations.
     const complexity = inputs.complexity as keyof ComplexityFactorSettings | undefined;
-    const factor = complexity ? complexityFactors[complexity] ?? 1.0 : 1.0; // Default to 1.0 if not set or invalid
-    calculatedPrice *= factor;
+    const complexityFactor = complexity ? complexityFactors[complexity] ?? 1.0 : 1.0;
+    calculatedPrice *= complexityFactor;
 
-
-    // Apply other variable modifiers based on their definitions in PRICING_VARIABLES and current settings
-    // Example: ERP Category (Hypothetical - assuming a modifier is defined)
-    const erpVar = PRICING_VARIABLES.find(v => v.id === 'erpCategory');
-    if (erpVar?.modifier?.type === 'factor' && erpVar.modifier.values && typeof inputs.erpCategory === 'string') {
-        const erpFactor = erpVar.modifier.values[inputs.erpCategory] ?? 1.0;
-        // Decide how to apply this - multiply? Add fixed amount? Needs specific rules per task.
-        // calculatedPrice *= erpFactor; // Example multiplication
+    // Apply Price Per Sqm (Only if explicitly defined for the task and not overridden by threshold logic)
+    // Example: maybe specific audit tasks still use a base price + per sqm?
+    if (basePricePerSqm > 0 && typeof inputs.surface === 'number') {
+        // Decide if this adds ON TOP of threshold calculations or REPLACES them.
+        // For now, let's assume it adds if the task has a specific pricePerSqm defined.
+        // This needs clarification. Let's comment it out for now to avoid double counting with groundArea.
+        // calculatedPrice += inputs.surface * basePricePerSqm;
     }
-    // Add logic for other variables like 'levels', 'cells' if they modify price
 
 
     // Handle boolean toggles like 'needsPlans'
     if (taskId.includes('_plans_') && taskId.includes('realisation_') && inputs.needsPlans === false) {
-        return 0; // Set price to 0 if plans are not needed for realization tasks
+        return { price: 0 }; // Set price to 0 if plans are not needed for realization tasks
     }
 
 
-    // --- !!! IMPORTANT !!! ---
-    // Refine and add more rules based on specific task requirements and
-    // how each PRICING_VARIABLE (with its potential modifier settings)
-    // should influence the final price of THIS specific task.
-    // --- / IMPORTANT ---
-
-
-    return Math.max(0, calculatedPrice); // Ensure price is not negative
+    return { price: Math.max(0, calculatedPrice), details }; // Ensure price is not negative
 };
 
 const calculateSubcontractorCost = (items: QuoteItem[]): number => {
     // Placeholder: Still using simple percentage for now.
     // This should ideally be configurable per task in settings as well.
-    const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
     let cost = 0;
     items.forEach(item => {
         // Example: Different cost factor for different task types - could be stored in settings
@@ -102,7 +179,12 @@ export const generateQuote = (
     const currentMinMargin = getCurrentMinMarginPercentage();
     const currentTaskPrices = getCurrentTaskPrices();
     const currentComplexityFactors = getCurrentComplexityFactors();
-    // Load other relevant settings...
+    const currentDistanceThresholds = getCurrentDistanceThresholds();
+    const currentGroundAreaThresholds = getCurrentGroundAreaThresholds();
+    const currentFloorsNumberThresholds = getCurrentFloorsNumberThresholds();
+    const currentMainRoomsNumberThresholds = getCurrentMainRoomsNumberThresholds();
+    const currentErpFactors = getCurrentErpFactors();
+    const currentPricePerPage = getCurrentPricePerPage();
 
     // 1. Calculate price for each selected task and group them
     selectedTaskIds.forEach(taskId => {
@@ -110,7 +192,18 @@ export const generateQuote = (
         const service = findServiceForTask(taskId); // Find the parent service
 
         if (task && service) {
-            const unitPrice = calculateTaskPrice(taskId, inputs, currentTaskPrices, currentComplexityFactors);
+             const { price: unitPrice, details } = calculateTaskPrice(
+                taskId,
+                inputs,
+                currentTaskPrices,
+                currentComplexityFactors,
+                currentDistanceThresholds,
+                currentGroundAreaThresholds,
+                currentFloorsNumberThresholds,
+                currentMainRoomsNumberThresholds,
+                currentErpFactors,
+                currentPricePerPage
+            );
             const quantity = 1; // Assume quantity 1 for now
             const totalPrice = unitPrice * quantity;
 
@@ -123,6 +216,7 @@ export const generateQuote = (
                 quantity: quantity,
                 unitPrice: unitPrice,
                 totalPrice: totalPrice,
+                details: details, // Include calculation details if any
             };
 
             // Add to the flat list
@@ -137,20 +231,12 @@ export const generateQuote = (
                     subtotal: 0,
                 };
             }
-            // Only add items with a positive price to the visual group? Or include zero-price?
-            // Let's include zero-price items for now to show they were selected.
-            // if (totalPrice > 0) {
-                 groupedItems[service.id].items.push(quoteItem);
-                 groupedItems[service.id].subtotal += totalPrice;
-            // }
+            groupedItems[service.id].items.push(quoteItem);
+            groupedItems[service.id].subtotal += totalPrice;
 
         }
     });
 
-    // Filter out groups with no items or zero total subtotal if needed (optional)
-    // const finalGroupedItems = Object.entries(groupedItems)
-    //    .filter(([_, group]) => group.subtotal > 0)
-    //    .reduce((acc, [id, group]) => { acc[id] = group; return acc; }, {} as Record<string, QuoteItemGroup>);
     const finalGroupedItems = groupedItems; // Keep all groups for now
 
     // 3. Calculate overall totals based on the flat list (includes all items)
@@ -199,10 +285,52 @@ export const generateQuote = (
 
 
 // --- Helper Function for Determining Applicable Variables ---
-// (Keep as is for now, returning all variables)
-export const getApplicableVariables = (selectedServices: Service[]): PricingVariable[] => {
-    // This could be enhanced to analyze the specific pricing logic
-    // of the selected tasks (considering settings) to show only relevant variables.
-    // For now, returning all defined variables is simpler.
-    return PRICING_VARIABLES;
-}
+export const getApplicableVariables = (selectedTaskIds: string[]): PricingVariable[] => {
+    const applicableIds = new Set<string>();
+
+    // Always add core variables
+    applicableIds.add('complexity');
+    applicableIds.add('discount'); // Assuming discount is always applicable
+
+    // Determine applicability based on selected tasks
+    selectedTaskIds.forEach(taskId => {
+        // Distance
+        if (taskId.includes('deplacement_')) {
+            applicableIds.add('distance');
+        }
+        // Area, Floors, Rooms
+        if (taskId.includes('releve_geometrique') || taskId.includes('realisation_plans_existant') || taskId.includes('realisation_plans_projet')) {
+            applicableIds.add('groundArea');
+            applicableIds.add('floorsNumber');
+            applicableIds.add('mainRoomsNumber');
+             applicableIds.add('surface'); // Keep legacy?
+        }
+        // ERP Ranking
+        if (taskId.includes('redaction_notice_securite') || taskId.includes('redaction_notice_accessibilite')) {
+            applicableIds.add('erpRanking');
+             applicableIds.add('erpCategory'); // Keep legacy?
+        }
+        // Derogations
+        if (taskId.includes('redaction_demande_derogation')) {
+            applicableIds.add('derogationsNumber');
+        }
+        // Printing
+        if (taskId.includes('impression_dossier') || taskId.includes('impression_plans')) {
+            applicableIds.add('copiesNumber');
+            // Also need floorsNumber for page calculation, ensure it's added
+             if (!applicableIds.has('floorsNumber')) applicableIds.add('floorsNumber');
+        }
+         // Needs Plans
+        if (taskId.includes('_plans_') && taskId.includes('realisation_')) {
+            applicableIds.add('needsPlans');
+        }
+        // Keep legacy variables if the corresponding new ones aren't triggered? Or based on task type?
+         if (taskId.includes('level')) applicableIds.add('levels');
+         if (taskId.includes('cell')) applicableIds.add('cells');
+
+    });
+
+
+    // Filter PRICING_VARIABLES based on the collected applicable IDs
+    return PRICING_VARIABLES.filter(variable => applicableIds.has(variable.id));
+};
