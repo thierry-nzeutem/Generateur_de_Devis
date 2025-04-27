@@ -1,154 +1,191 @@
-import type { Quote, QuoteInput, QuoteItem, Service, Task, PricingVariable } from '@/types';
-import { ALL_TASKS, DEFAULT_VAT_RATE, DEFAULT_MIN_MARGIN_PERCENTAGE, SERVICES, PRICING_VARIABLES } from '@/config/services'; // Import SERVICES and PRICING_VARIABLES
+import type { Quote, QuoteInput, QuoteItem, Service, Task, PricingVariable, QuoteItemGroup, AppSettings, ComplexityFactorSettings, TaskPriceSettings } from '@/types';
+import {
+    ALL_TASKS,
+    SERVICES,
+    PRICING_VARIABLES,
+    getCurrentVatRate, // Use function to get current rate
+    getCurrentMinMarginPercentage, // Use function to get current rate
+    getCurrentTaskPrices, // Use function to get current task prices
+    getCurrentComplexityFactors, // Use function to get current factors
+} from '@/config/services';
 import { v4 as uuidv4 } from 'uuid'; // Use UUID for unique quote IDs
 
 
-// --- Placeholder Pricing Logic ---
-// This needs to be replaced with actual, detailed pricing rules based on Prévéris' specific formulas.
-// These might involve database lookups, complex conditional logic, etc.
-// For now, we'll use simple placeholder calculations.
+// --- Pricing Logic using Settings ---
 
-const calculateTaskPrice = (taskId: string, inputs: QuoteInput): number => {
+const calculateTaskPrice = (taskId: string, inputs: QuoteInput, taskPrices: TaskPriceSettings, complexityFactors: ComplexityFactorSettings): number => {
     const task = ALL_TASKS[taskId];
     if (!task) return 0;
 
-    let price = task.unitPrice || 0; // Base price if defined directly on task
+    // Get base prices from current settings (which fall back to defaults if not set)
+    const currentTaskSettings = taskPrices[taskId] || {};
+    const baseUnitPrice = currentTaskSettings.unitPrice ?? task.unitPrice ?? 0;
+    const basePricePerSqm = currentTaskSettings.pricePerSqm ?? task.pricePerSqm ?? 0;
 
-    // Example: Simple price modification based on surface area
-    if (inputs.surface && typeof inputs.surface === 'number' && task.pricePerSqm) {
-        price += inputs.surface * task.pricePerSqm;
-    }
+    let calculatedPrice = baseUnitPrice;
 
-    // Example: Add cost based on complexity
-    if (inputs.complexity === 'Moyenne') {
-        price *= 1.2;
-    } else if (inputs.complexity === 'Complexe') {
-        price *= 1.5;
+    // Apply price per sqm if applicable and surface is provided
+    if (basePricePerSqm > 0 && inputs.surface && typeof inputs.surface === 'number') {
+        calculatedPrice += inputs.surface * basePricePerSqm;
     }
 
-    // Example: Boolean variable influence (Needs specific task ID)
-    if (taskId === 'realisation_plans_existant_at' && inputs.needsPlans === false) {
-         // Example: Don't charge if task is 'realisation_plans_existant_at' and needsPlans is false
-        return 0;
+    // Apply complexity factor using current settings
+    const complexity = inputs.complexity as keyof ComplexityFactorSettings | undefined;
+    const factor = complexity ? complexityFactors[complexity] ?? 1.0 : 1.0; // Default to 1.0 if not set or invalid
+    calculatedPrice *= factor;
+
+
+    // Apply other variable modifiers based on their definitions in PRICING_VARIABLES and current settings
+    // Example: ERP Category (Hypothetical - assuming a modifier is defined)
+    const erpVar = PRICING_VARIABLES.find(v => v.id === 'erpCategory');
+    if (erpVar?.modifier?.type === 'factor' && erpVar.modifier.values && typeof inputs.erpCategory === 'string') {
+        const erpFactor = erpVar.modifier.values[inputs.erpCategory] ?? 1.0;
+        // Decide how to apply this - multiply? Add fixed amount? Needs specific rules per task.
+        // calculatedPrice *= erpFactor; // Example multiplication
     }
-    if (taskId === 'realisation_plans_projet_at' && inputs.needsPlans === false) {
-         // Example: Don't charge if task is 'realisation_plans_projet_at' and needsPlans is false
-        return 0;
-    }
-     // Add similar logic for other plan-related tasks if 'needsPlans' applies
-     if (taskId.includes('_plans_') && taskId.includes('realisation_') && inputs.needsPlans === false) {
-        return 0; // General rule for plan realization tasks if needsPlans is false
+    // Add logic for other variables like 'levels', 'cells' if they modify price
+
+
+    // Handle boolean toggles like 'needsPlans'
+    if (taskId.includes('_plans_') && taskId.includes('realisation_') && inputs.needsPlans === false) {
+        return 0; // Set price to 0 if plans are not needed for realization tasks
     }
 
 
     // --- !!! IMPORTANT !!! ---
-    // Add many more rules here based on ALL_TASKS properties and PRICING_VARIABLES
-    // This is where the core business logic resides.
-    // Consider factors like levels, ERP category, specific task combinations, etc.
+    // Refine and add more rules based on specific task requirements and
+    // how each PRICING_VARIABLE (with its potential modifier settings)
+    // should influence the final price of THIS specific task.
     // --- / IMPORTANT ---
 
-    // Placeholder base price for tasks without specific logic yet
-    if (price === 0 && !task.pricePerSqm) {
-        // Assign a default placeholder price - REPLACE THIS
-        if (taskId.includes('deplacement')) price = 150;
-        else if (taskId.includes('redaction') || taskId.includes('realisation_plans')) price = 250;
-        else if (taskId.includes('maintenance')) price = 100;
-        else price = 50; // Generic fallback
-    }
 
-
-    return Math.max(0, price); // Ensure price is not negative
+    return Math.max(0, calculatedPrice); // Ensure price is not negative
 };
 
 const calculateSubcontractorCost = (items: QuoteItem[]): number => {
-    // Placeholder: Assume 60% of the subtotal goes to subcontractors
-    // Replace with actual subcontractor cost calculation logic based on specific tasks
+    // Placeholder: Still using simple percentage for now.
+    // This should ideally be configurable per task in settings as well.
     const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
     let cost = 0;
     items.forEach(item => {
-        // Example: Different cost factor for different task types
+        // Example: Different cost factor for different task types - could be stored in settings
+        let factor = 0.6; // Default factor
         if (item.id.includes('architecte') || item.id.includes('plans')) {
-            cost += item.totalPrice * 0.7; // Higher subcontractor cost for architect/plan tasks
+            factor = 0.7;
         } else if (item.id.includes('maintenance')) {
-            cost += item.totalPrice * 0.5; // Lower cost for maintenance
-        } else {
-            cost += item.totalPrice * 0.6; // Default cost
+            factor = 0.5;
         }
+        cost += item.totalPrice * factor;
     });
     return cost;
-    // return subtotal * 0.6; // Original simple calculation
+};
+
+// Function to find the service associated with a task ID
+const findServiceForTask = (taskId: string): Service | undefined => {
+    return SERVICES.find(service => service.tasks[taskId]);
 };
 
 // --- Main Quote Generation Function ---
 
 export const generateQuote = (
-    selectedTaskIds: string[], // Accept task IDs directly
+    selectedTaskIds: string[],
     inputs: QuoteInput,
     discountPercentage: number = 0
 ): Quote => {
     const quoteId = uuidv4();
     const dateGenerated = new Date();
     const quoteItems: QuoteItem[] = [];
+    const groupedItems: Record<string, QuoteItemGroup> = {}; // Initialize grouped items
 
-    // 1. Calculate price for each selected task
+    // Load current settings at the time of generation
+    const currentVatRate = getCurrentVatRate();
+    const currentMinMargin = getCurrentMinMarginPercentage();
+    const currentTaskPrices = getCurrentTaskPrices();
+    const currentComplexityFactors = getCurrentComplexityFactors();
+    // Load other relevant settings...
+
+    // 1. Calculate price for each selected task and group them
     selectedTaskIds.forEach(taskId => {
         const task = ALL_TASKS[taskId];
-        if (task) {
-            const unitPrice = calculateTaskPrice(taskId, inputs);
-            // For simplicity, assume quantity is 1 for each task unless specified otherwise
-            const quantity = 1; // TODO: Allow quantity input for certain tasks if needed
+        const service = findServiceForTask(taskId); // Find the parent service
+
+        if (task && service) {
+            const unitPrice = calculateTaskPrice(taskId, inputs, currentTaskPrices, currentComplexityFactors);
+            const quantity = 1; // Assume quantity 1 for now
             const totalPrice = unitPrice * quantity;
 
-            if (totalPrice >= 0) { // Add items even if price is 0 (to show they were considered)
-                quoteItems.push({
-                    id: taskId,
-                    name: task.name,
-                    quantity: quantity,
-                    unitPrice: unitPrice,
-                    totalPrice: totalPrice,
-                });
+             // Create the quote item
+             const quoteItem: QuoteItem = {
+                id: taskId,
+                name: task.name,
+                serviceId: service.id,
+                serviceName: service.name, // Add service name
+                quantity: quantity,
+                unitPrice: unitPrice,
+                totalPrice: totalPrice,
+            };
+
+            // Add to the flat list
+            quoteItems.push(quoteItem);
+
+            // Add to the grouped structure
+            if (!groupedItems[service.id]) {
+                groupedItems[service.id] = {
+                    serviceId: service.id,
+                    serviceName: service.name,
+                    items: [],
+                    subtotal: 0,
+                };
             }
+            // Only add items with a positive price to the visual group? Or include zero-price?
+            // Let's include zero-price items for now to show they were selected.
+            // if (totalPrice > 0) {
+                 groupedItems[service.id].items.push(quoteItem);
+                 groupedItems[service.id].subtotal += totalPrice;
+            // }
+
         }
     });
 
-     // Filter out items with 0 total price AFTER initial calculation if desired (optional)
-     // const finalQuoteItems = quoteItems.filter(item => item.totalPrice > 0);
-     const finalQuoteItems = quoteItems; // Keep 0-price items for now
+    // Filter out groups with no items or zero total subtotal if needed (optional)
+    // const finalGroupedItems = Object.entries(groupedItems)
+    //    .filter(([_, group]) => group.subtotal > 0)
+    //    .reduce((acc, [id, group]) => { acc[id] = group; return acc; }, {} as Record<string, QuoteItemGroup>);
+    const finalGroupedItems = groupedItems; // Keep all groups for now
 
-    // 3. Calculate totals based on final items
-    const subtotal = finalQuoteItems.reduce((sum, item) => sum + item.totalPrice, 0);
+    // 3. Calculate overall totals based on the flat list (includes all items)
+    const subtotal = quoteItems.reduce((sum, item) => sum + item.totalPrice, 0);
     const discountAmount = (subtotal * discountPercentage) / 100;
     const totalBeforeTax = subtotal - discountAmount;
-    const vatRate = DEFAULT_VAT_RATE;
-    const vatAmount = (totalBeforeTax * vatRate) / 100;
+    const vatAmount = (totalBeforeTax * currentVatRate) / 100;
     const totalAfterTax = totalBeforeTax + vatAmount;
 
-    // 4. Calculate Margin based on final items
-    const subcontractorCost = calculateSubcontractorCost(finalQuoteItems);
+    // 4. Calculate Margin based on flat list
+    const subcontractorCost = calculateSubcontractorCost(quoteItems);
     const marginAmount = totalBeforeTax - subcontractorCost;
-    const marginPercentage = totalBeforeTax > 0 ? (marginAmount / totalBeforeTax) * 100 : (subtotal > 0 ? -Infinity : 0); // Handle zero totalBeforeTax
+    const marginPercentage = totalBeforeTax > 0 ? (marginAmount / totalBeforeTax) * 100 : (subtotal > 0 ? -Infinity : 0);
 
-    // 5. Add Warnings
+    // 5. Add Warnings using current minimum margin setting
     const warnings: string[] = [];
-     // Check margin only if there's a positive total before tax
-     if (totalBeforeTax > 0 && marginPercentage < DEFAULT_MIN_MARGIN_PERCENTAGE) {
-        warnings.push(`Alerte: Marge (${marginPercentage.toFixed(1)}%) inférieure à l'objectif (${DEFAULT_MIN_MARGIN_PERCENTAGE}%)`);
+     if (totalBeforeTax > 0 && marginPercentage < currentMinMargin) {
+        warnings.push(`Alerte: Marge (${marginPercentage.toFixed(1)}%) inférieure à l'objectif (${currentMinMargin}%)`);
      } else if (totalBeforeTax <= 0 && subtotal > 0) {
          warnings.push(`Alerte: Marge négative ou nulle due à la remise.`);
      }
-     // Add other warnings as needed
+     // Add other warnings...
 
 
     // 6. Assemble Quote Object
     const quote: Quote = {
         id: quoteId,
         dateGenerated,
-        items: finalQuoteItems,
+        items: quoteItems, // Flat list
+        groupedItems: finalGroupedItems, // Grouped items
         subtotal,
         discountPercentage,
         discountAmount,
         totalBeforeTax,
-        vatRate,
+        vatRate: currentVatRate,
         vatAmount,
         totalAfterTax,
         subcontractorCost,
@@ -160,33 +197,12 @@ export const generateQuote = (
     return quote;
 };
 
-// --- Helper Function for Admin/Display ---
-// Updated to derive applicable variables from selected *services* (derived from tasks)
+
+// --- Helper Function for Determining Applicable Variables ---
+// (Keep as is for now, returning all variables)
 export const getApplicableVariables = (selectedServices: Service[]): PricingVariable[] => {
-    // For now, return all variables. Refine later if needed.
-    // A more sophisticated approach would analyze the pricing rules for the
-    // *tasks* within the *selected services* to determine which variables are relevant.
-    // This avoids showing irrelevant inputs like "Number of Cells" if no selected task uses it.
-
-    // Simple approach: return all variables for now.
-    // return PRICING_VARIABLES;
-
-    // Placeholder for future refinement:
-    const relevantVariableIds = new Set<string>();
-    // TODO: Loop through tasks in selectedServices, check their pricing rules,
-    // and add the required variable IDs to relevantVariableIds.
-    // Example pseudo-code:
-    // selectedServices.forEach(service => {
-    //   Object.keys(service.tasks).forEach(taskId => {
-    //      const rules = getPricingRulesForTask(taskId); // Fetch rules
-    //      rules.forEach(rule => {
-    //          rule.conditions.forEach(cond => relevantVariableIds.add(cond.variableId));
-    //          // Parse rule.formula to find variables if needed
-    //      });
-    //   });
-    // });
-    // return PRICING_VARIABLES.filter(v => relevantVariableIds.has(v.id));
-
-    // Returning all for now:
+    // This could be enhanced to analyze the specific pricing logic
+    // of the selected tasks (considering settings) to show only relevant variables.
+    // For now, returning all defined variables is simpler.
     return PRICING_VARIABLES;
 }
