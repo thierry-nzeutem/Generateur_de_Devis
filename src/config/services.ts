@@ -1,4 +1,4 @@
-import type { Service, Task } from '@/types';
+import type { Service, Task, PricingVariable } from '@/types';
 
 // Define Tasks first (simplified for now, pricing logic needs detail)
 export const ALL_TASKS: Record<string, Task> = {
@@ -248,13 +248,34 @@ export const PRICING_VARIABLES: PricingVariable[] = [
     { id: 'erpCategory', label: 'Catégorie ERP', type: 'select', options: ['1', '2', '3', '4', '5'], defaultValue: '5' },
     { id: 'levels', label: 'Nombre de niveaux', type: 'number', defaultValue: 1 },
     { id: 'cells', label: 'Nombre de cellules', type: 'number', defaultValue: 1 },
-    { id: 'needsPlans', label: 'Besoin de plans', type: 'boolean', defaultValue: false },
+    { id: 'needsPlans', label: 'Besoin de réalisation de plans', type: 'boolean', defaultValue: true }, // Default to true
     { id: 'complexity', label: 'Complexité', type: 'select', options: ['Simple', 'Moyenne', 'Complexe'], defaultValue: 'Simple' },
     // Add more variables as needed
 ];
 
-// Define default VAT Rate
-export const DEFAULT_VAT_RATE = 20; // 20%
+// Function to safely get number from localStorage
+const getNumberFromLocalStorage = (key: string, defaultValue: number): number => {
+    if (typeof window === 'undefined') {
+      return defaultValue; // Return default if on server-side
+    }
+    try {
+      const storedValue = localStorage.getItem(key);
+      if (storedValue !== null) {
+        const parsedValue = parseFloat(storedValue);
+        if (!isNaN(parsedValue)) {
+          return parsedValue;
+        }
+      }
+    } catch (error) {
+      console.error(`Error reading localStorage key “${key}”:`, error);
+    }
+    return defaultValue;
+  };
 
-// Define default minimum margin target
-export const DEFAULT_MIN_MARGIN_PERCENTAGE = 30; // 30%
+
+// Define default VAT Rate - Load from localStorage if available (client-side)
+export const DEFAULT_VAT_RATE = getNumberFromLocalStorage('defaultVatRate', 20); // Default to 20%
+
+
+// Define default minimum margin target - Load from localStorage if available (client-side)
+export const DEFAULT_MIN_MARGIN_PERCENTAGE = getNumberFromLocalStorage('minMarginPercentage', 30); // Default to 30%

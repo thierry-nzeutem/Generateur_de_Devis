@@ -1,5 +1,5 @@
 import type { Quote, QuoteInput, QuoteItem, Service, Task, PricingVariable } from '@/types';
-import { ALL_TASKS, DEFAULT_VAT_RATE, DEFAULT_MIN_MARGIN_PERCENTAGE } from '@/config/services';
+import { ALL_TASKS, DEFAULT_VAT_RATE, DEFAULT_MIN_MARGIN_PERCENTAGE, SERVICES, PRICING_VARIABLES } from '@/config/services'; // Import SERVICES and PRICING_VARIABLES
 import { v4 as uuidv4 } from 'uuid'; // Use UUID for unique quote IDs
 
 
@@ -26,10 +26,20 @@ const calculateTaskPrice = (taskId: string, inputs: QuoteInput): number => {
         price *= 1.5;
     }
 
-    // Example: Boolean variable influence
+    // Example: Boolean variable influence (Needs specific task ID)
     if (taskId === 'realisation_plans_existant_at' && inputs.needsPlans === false) {
-        return 0; // Don't charge if plans are not needed but task is selected
+         // Example: Don't charge if task is 'realisation_plans_existant_at' and needsPlans is false
+        return 0;
     }
+    if (taskId === 'realisation_plans_projet_at' && inputs.needsPlans === false) {
+         // Example: Don't charge if task is 'realisation_plans_projet_at' and needsPlans is false
+        return 0;
+    }
+     // Add similar logic for other plan-related tasks if 'needsPlans' applies
+     if (taskId.includes('_plans_') && taskId.includes('realisation_') && inputs.needsPlans === false) {
+        return 0; // General rule for plan realization tasks if needsPlans is false
+    }
+
 
     // --- !!! IMPORTANT !!! ---
     // Add many more rules here based on ALL_TASKS properties and PRICING_VARIABLES
@@ -43,7 +53,7 @@ const calculateTaskPrice = (taskId: string, inputs: QuoteInput): number => {
         if (taskId.includes('deplacement')) price = 150;
         else if (taskId.includes('redaction') || taskId.includes('realisation_plans')) price = 250;
         else if (taskId.includes('maintenance')) price = 100;
-        else price = 50;
+        else price = 50; // Generic fallback
     }
 
 
@@ -52,34 +62,36 @@ const calculateTaskPrice = (taskId: string, inputs: QuoteInput): number => {
 
 const calculateSubcontractorCost = (items: QuoteItem[]): number => {
     // Placeholder: Assume 60% of the subtotal goes to subcontractors
-    // Replace with actual subcontractor cost calculation logic
+    // Replace with actual subcontractor cost calculation logic based on specific tasks
     const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
-    return subtotal * 0.6;
+    let cost = 0;
+    items.forEach(item => {
+        // Example: Different cost factor for different task types
+        if (item.id.includes('architecte') || item.id.includes('plans')) {
+            cost += item.totalPrice * 0.7; // Higher subcontractor cost for architect/plan tasks
+        } else if (item.id.includes('maintenance')) {
+            cost += item.totalPrice * 0.5; // Lower cost for maintenance
+        } else {
+            cost += item.totalPrice * 0.6; // Default cost
+        }
+    });
+    return cost;
+    // return subtotal * 0.6; // Original simple calculation
 };
 
 // --- Main Quote Generation Function ---
 
 export const generateQuote = (
-    selectedServices: Service[],
+    selectedTaskIds: string[], // Accept task IDs directly
     inputs: QuoteInput,
     discountPercentage: number = 0
 ): Quote => {
     const quoteId = uuidv4();
     const dateGenerated = new Date();
     const quoteItems: QuoteItem[] = [];
-    const includedTaskIds = new Set<string>();
 
-    // 1. Collect all tasks from selected services
-    selectedServices.forEach(service => {
-        Object.keys(service.tasks).forEach(taskId => {
-            if (service.tasks[taskId]) {
-                includedTaskIds.add(taskId);
-            }
-        });
-    });
-
-    // 2. Calculate price for each included task
-    includedTaskIds.forEach(taskId => {
+    // 1. Calculate price for each selected task
+    selectedTaskIds.forEach(taskId => {
         const task = ALL_TASKS[taskId];
         if (task) {
             const unitPrice = calculateTaskPrice(taskId, inputs);
@@ -87,7 +99,7 @@ export const generateQuote = (
             const quantity = 1; // TODO: Allow quantity input for certain tasks if needed
             const totalPrice = unitPrice * quantity;
 
-            if (totalPrice > 0) { // Only add items with a cost
+            if (totalPrice >= 0) { // Add items even if price is 0 (to show they were considered)
                 quoteItems.push({
                     id: taskId,
                     name: task.name,
@@ -99,30 +111,39 @@ export const generateQuote = (
         }
     });
 
-    // 3. Calculate totals
-    const subtotal = quoteItems.reduce((sum, item) => sum + item.totalPrice, 0);
+     // Filter out items with 0 total price AFTER initial calculation if desired (optional)
+     // const finalQuoteItems = quoteItems.filter(item => item.totalPrice > 0);
+     const finalQuoteItems = quoteItems; // Keep 0-price items for now
+
+    // 3. Calculate totals based on final items
+    const subtotal = finalQuoteItems.reduce((sum, item) => sum + item.totalPrice, 0);
     const discountAmount = (subtotal * discountPercentage) / 100;
     const totalBeforeTax = subtotal - discountAmount;
     const vatRate = DEFAULT_VAT_RATE;
     const vatAmount = (totalBeforeTax * vatRate) / 100;
     const totalAfterTax = totalBeforeTax + vatAmount;
 
-    // 4. Calculate Margin (Placeholder)
-    const subcontractorCost = calculateSubcontractorCost(quoteItems);
+    // 4. Calculate Margin based on final items
+    const subcontractorCost = calculateSubcontractorCost(finalQuoteItems);
     const marginAmount = totalBeforeTax - subcontractorCost;
-    const marginPercentage = totalBeforeTax > 0 ? (marginAmount / totalBeforeTax) * 100 : 0;
+    const marginPercentage = totalBeforeTax > 0 ? (marginAmount / totalBeforeTax) * 100 : (subtotal > 0 ? -Infinity : 0); // Handle zero totalBeforeTax
 
     // 5. Add Warnings
     const warnings: string[] = [];
-    if (marginPercentage < DEFAULT_MIN_MARGIN_PERCENTAGE) {
+     // Check margin only if there's a positive total before tax
+     if (totalBeforeTax > 0 && marginPercentage < DEFAULT_MIN_MARGIN_PERCENTAGE) {
         warnings.push(`Alerte: Marge (${marginPercentage.toFixed(1)}%) inférieure à l'objectif (${DEFAULT_MIN_MARGIN_PERCENTAGE}%)`);
-    }
+     } else if (totalBeforeTax <= 0 && subtotal > 0) {
+         warnings.push(`Alerte: Marge négative ou nulle due à la remise.`);
+     }
+     // Add other warnings as needed
+
 
     // 6. Assemble Quote Object
     const quote: Quote = {
         id: quoteId,
         dateGenerated,
-        items: quoteItems,
+        items: finalQuoteItems,
         subtotal,
         discountPercentage,
         discountAmount,
@@ -140,11 +161,32 @@ export const generateQuote = (
 };
 
 // --- Helper Function for Admin/Display ---
+// Updated to derive applicable variables from selected *services* (derived from tasks)
 export const getApplicableVariables = (selectedServices: Service[]): PricingVariable[] => {
-    // In a real app, this might analyze which variables are actually used
-    // in the pricing rules for the tasks within the selected services.
-    // For now, we return all variables as potentially applicable.
-    // This should be refined based on actual pricing logic.
-    const { PRICING_VARIABLES } = require('@/config/services'); // Load dynamically if needed elsewhere
+    // For now, return all variables. Refine later if needed.
+    // A more sophisticated approach would analyze the pricing rules for the
+    // *tasks* within the *selected services* to determine which variables are relevant.
+    // This avoids showing irrelevant inputs like "Number of Cells" if no selected task uses it.
+
+    // Simple approach: return all variables for now.
+    // return PRICING_VARIABLES;
+
+    // Placeholder for future refinement:
+    const relevantVariableIds = new Set<string>();
+    // TODO: Loop through tasks in selectedServices, check their pricing rules,
+    // and add the required variable IDs to relevantVariableIds.
+    // Example pseudo-code:
+    // selectedServices.forEach(service => {
+    //   Object.keys(service.tasks).forEach(taskId => {
+    //      const rules = getPricingRulesForTask(taskId); // Fetch rules
+    //      rules.forEach(rule => {
+    //          rule.conditions.forEach(cond => relevantVariableIds.add(cond.variableId));
+    //          // Parse rule.formula to find variables if needed
+    //      });
+    //   });
+    // });
+    // return PRICING_VARIABLES.filter(v => relevantVariableIds.has(v.id));
+
+    // Returning all for now:
     return PRICING_VARIABLES;
 }

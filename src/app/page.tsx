@@ -1,9 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import { useState } from 'react';
-import type { Service, Quote, QuoteInput, PricingVariable } from '@/types';
-import { SERVICES, PRICING_VARIABLES } from '@/config/services';
+import { useState, useEffect, useCallback } from 'react';
+import type { Service, Quote, QuoteInput, PricingVariable, Task } from '@/types';
+import { SERVICES, PRICING_VARIABLES, ALL_TASKS } from '@/config/services';
 import { generateQuote, getApplicableVariables } from '@/lib/pricingEngine';
 
 import { Button } from '@/components/ui/button';
@@ -16,12 +16,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
+import Link from 'next/link'; // Import Link
 
-import { FileText, Settings, Calculator, AlertTriangle, Euro, Percent, CheckCircle } from 'lucide-react';
+import { FileText, Settings, Calculator, AlertTriangle, Euro, Percent, CheckCircle, ListChecks, Cog } from 'lucide-react'; // Added ListChecks, Cog
 
 export default function QuoteGeneratorPage() {
-  const [selectedServices, setSelectedServices] = useState<Record<string, boolean>>({});
+  // State for selected tasks (fine-grained control)
+  const [selectedTasks, setSelectedTasks] = useState<Record<string, boolean>>({});
+  // State to track which service accordions are open (optional, for UI)
+  const [openAccordions, setOpenAccordions] = useState<string[]>([]);
+
   const [pricingInputs, setPricingInputs] = useState<QuoteInput>(() => {
     const defaults: QuoteInput = {};
     PRICING_VARIABLES.forEach(v => {
@@ -37,18 +43,62 @@ export default function QuoteGeneratorPage() {
 
   const { toast } = useToast();
 
-  const handleServiceToggle = (serviceId: string) => {
-    setSelectedServices(prev => {
-        const newState = { ...prev, [serviceId]: !prev[serviceId] };
-        // Update applicable variables when services change
-        const currentSelectedServices = SERVICES.filter(s => newState[s.id]);
-        setApplicableVariables(getApplicableVariables(currentSelectedServices));
-        // Reset quote when selections change
-        setGeneratedQuote(null);
+  // Derive selected services based on selected tasks for variable calculation
+  const derivedSelectedServices = useCallback(() => {
+      const serviceIds = new Set<string>();
+      SERVICES.forEach(service => {
+          const hasSelectedTask = Object.keys(service.tasks).some(taskId => selectedTasks[taskId]);
+          if (hasSelectedTask) {
+              serviceIds.add(service.id);
+          }
+      });
+      return SERVICES.filter(s => serviceIds.has(s.id));
+  }, [selectedTasks]);
+
+  useEffect(() => {
+    // Update applicable variables whenever selected tasks change
+    setApplicableVariables(getApplicableVariables(derivedSelectedServices()));
+    // Reset quote when selections change
+    setGeneratedQuote(null);
+  }, [selectedTasks, derivedSelectedServices]);
+
+  const handleServiceToggle = (serviceId: string, isChecked: boolean) => {
+    const service = SERVICES.find(s => s.id === serviceId);
+    if (!service) return;
+
+    setSelectedTasks(prev => {
+        const newState = { ...prev };
+        Object.keys(service.tasks).forEach(taskId => {
+            newState[taskId] = isChecked; // Select/deselect all tasks of this service
+        });
         return newState;
     });
 
+     // Manage accordion state (open when checked, close when unchecked)
+     setOpenAccordions(prev =>
+         isChecked ? [...prev, serviceId] : prev.filter(id => id !== serviceId)
+     );
   };
+
+  const handleTaskToggle = (taskId: string, isChecked: boolean) => {
+    setSelectedTasks(prev => ({
+      ...prev,
+      [taskId]: isChecked,
+    }));
+  };
+
+  // Determine if a service checkbox should be checked (all tasks checked) or indeterminate (some tasks checked)
+  const getServiceCheckboxState = (serviceId: string): 'checked' | 'unchecked' | 'indeterminate' => {
+    const service = SERVICES.find(s => s.id === serviceId);
+    if (!service) return 'unchecked';
+    const taskIds = Object.keys(service.tasks);
+    const selectedCount = taskIds.filter(taskId => selectedTasks[taskId]).length;
+
+    if (selectedCount === 0) return 'unchecked';
+    if (selectedCount === taskIds.length) return 'checked';
+    return 'indeterminate';
+  };
+
 
   const handleInputChange = (id: string, value: string | number | boolean) => {
     setPricingInputs(prev => ({
@@ -67,18 +117,22 @@ export default function QuoteGeneratorPage() {
     };
 
   const handleGenerateQuote = () => {
-    const currentSelectedServices = SERVICES.filter(s => selectedServices[s.id]);
-    if (currentSelectedServices.length === 0) {
+    const currentSelectedTaskIds = Object.entries(selectedTasks)
+        .filter(([_, isSelected]) => isSelected)
+        .map(([taskId]) => taskId);
+
+    if (currentSelectedTaskIds.length === 0) {
         toast({
             variant: "destructive",
-            title: "Aucun service sélectionné",
-            description: "Veuillez sélectionner au moins un service pour générer un devis.",
+            title: "Aucune tâche sélectionnée",
+            description: "Veuillez sélectionner au moins une tâche pour générer un devis.",
         });
       return;
     }
 
     try {
-        const quote = generateQuote(currentSelectedServices, pricingInputs, discount);
+        // Pass selected task IDs to the generation function
+        const quote = generateQuote(currentSelectedTaskIds, pricingInputs, discount);
         setGeneratedQuote(quote);
         toast({
             title: "Devis généré",
@@ -106,44 +160,86 @@ export default function QuoteGeneratorPage() {
 
   return (
     <div className="container mx-auto p-4 md:p-8 bg-secondary min-h-screen">
-      <Card className="mb-8 shadow-lg">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold flex items-center gap-2 text-primary">
-             <FileText className="w-6 h-6" /> Prévéris - Générateur de Devis
-          </CardTitle>
-          <CardDescription>
-            Sélectionnez les prestations, ajustez les variables et générez un devis détaillé.
-          </CardDescription>
-        </CardHeader>
-      </Card>
+        <div className="flex justify-between items-center mb-6">
+            <Card className="flex-grow shadow-lg mr-4">
+                 <CardHeader>
+                     <CardTitle className="text-2xl font-bold flex items-center gap-2 text-primary">
+                        <FileText className="w-6 h-6" /> Prévéris - Générateur de Devis
+                     </CardTitle>
+                     <CardDescription>
+                        Sélectionnez les prestations et tâches, ajustez les variables et générez un devis détaillé.
+                     </CardDescription>
+                 </CardHeader>
+            </Card>
+            <Link href="/settings" passHref>
+                 <Button variant="outline" size="icon" className="shadow-md">
+                     <Cog className="h-5 w-5" />
+                     <span className="sr-only">Paramètres</span>
+                 </Button>
+             </Link>
+        </div>
+
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        {/* Left Column: Services & Variables */}
+        {/* Left Column: Services/Tasks & Variables */}
         <div className="md:col-span-1 space-y-6">
           <Card className="shadow-md">
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <CheckCircle className="w-5 h-5 text-primary"/> Prestations
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[300px] pr-4">
-                <div className="space-y-3">
-                  {SERVICES.map((service) => (
-                    <div key={service.id} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={`service-${service.id}`}
-                        checked={!!selectedServices[service.id]}
-                        onCheckedChange={() => handleServiceToggle(service.id)}
-                      />
-                      <Label htmlFor={`service-${service.id}`} className="text-sm font-medium cursor-pointer">
-                        {service.name}
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            </CardContent>
+             <CardHeader>
+               <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                 <ListChecks className="w-5 h-5 text-primary"/> Prestations & Tâches
+               </CardTitle>
+             </CardHeader>
+             <CardContent>
+               <ScrollArea className="h-[400px] pr-4">
+                  <Accordion
+                     type="multiple"
+                     value={openAccordions}
+                     onValueChange={setOpenAccordions}
+                     className="w-full"
+                    >
+                     {SERVICES.map((service) => {
+                       const serviceState = getServiceCheckboxState(service.id);
+                       return (
+                         <AccordionItem key={service.id} value={service.id}>
+                           <AccordionTrigger className="py-2 text-sm hover:no-underline">
+                             <div className="flex items-center space-x-2 flex-grow">
+                               <Checkbox
+                                 id={`service-${service.id}`}
+                                 checked={serviceState === 'checked'}
+                                 data-state={serviceState} // For potential indeterminate styling if needed
+                                 onCheckedChange={(checked) => handleServiceToggle(service.id, !!checked)}
+                                 onClick={(e) => e.stopPropagation()} // Prevent accordion toggle on checkbox click
+                                 className="mt-1"
+                               />
+                               <Label htmlFor={`service-${service.id}`} className="font-medium cursor-pointer">
+                                 {service.name}
+                               </Label>
+                             </div>
+                           </AccordionTrigger>
+                           <AccordionContent className="pl-8 pr-2 pb-2 pt-1 space-y-2">
+                             {Object.keys(service.tasks).map((taskId) => {
+                               const task = ALL_TASKS[taskId];
+                               if (!task) return null;
+                               return (
+                                 <div key={task.id} className="flex items-center space-x-2">
+                                   <Checkbox
+                                     id={`task-${task.id}`}
+                                     checked={!!selectedTasks[task.id]}
+                                     onCheckedChange={(checked) => handleTaskToggle(task.id, !!checked)}
+                                   />
+                                   <Label htmlFor={`task-${task.id}`} className="text-xs font-normal cursor-pointer text-muted-foreground">
+                                     {task.name}
+                                   </Label>
+                                 </div>
+                               );
+                             })}
+                           </AccordionContent>
+                         </AccordionItem>
+                       );
+                     })}
+                   </Accordion>
+               </ScrollArea>
+             </CardContent>
           </Card>
 
           <Card className="shadow-md">
@@ -153,51 +249,55 @@ export default function QuoteGeneratorPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {applicableVariables.map((variable) => (
-                <div key={variable.id} className="space-y-1">
-                  <Label htmlFor={variable.id} className="text-sm font-medium">
-                    {variable.label} {variable.type === 'number' && variable.unit ? `(${variable.unit})` : ''}
-                  </Label>
-                  {variable.type === 'number' && (
-                    <Input
-                      id={variable.id}
-                      type="number"
-                      value={pricingInputs[variable.id] as number ?? ''}
-                      onChange={(e) => handleInputChange(variable.id, parseFloat(e.target.value) || 0)}
-                      placeholder={`Entrez ${variable.label.toLowerCase()}`}
-                       min="0"
-                       className="text-sm"
-                    />
-                  )}
-                  {variable.type === 'select' && (
-                    <Select
-                      value={pricingInputs[variable.id] as string ?? variable.defaultValue}
-                      onValueChange={(value) => handleInputChange(variable.id, value)}
-                    >
-                      <SelectTrigger id={variable.id} className="w-full text-sm">
-                        <SelectValue placeholder={`Sélectionnez ${variable.label.toLowerCase()}`} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {variable.options.map(option => (
-                          <SelectItem key={option} value={option} className="text-sm">{option}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {variable.type === 'boolean' && (
-                     <div className="flex items-center space-x-2 pt-1">
-                       <Checkbox
-                         id={variable.id}
-                         checked={pricingInputs[variable.id] as boolean ?? false}
-                         onCheckedChange={(checked) => handleInputChange(variable.id, !!checked)}
-                       />
-                       <Label htmlFor={variable.id} className="text-sm font-normal">
-                         Activer
-                       </Label>
-                    </div>
-                  )}
-                </div>
-              ))}
+               {applicableVariables.length > 0 ? (
+                applicableVariables.map((variable) => (
+                  <div key={variable.id} className="space-y-1">
+                    <Label htmlFor={variable.id} className="text-sm font-medium">
+                      {variable.label} {variable.type === 'number' && variable.unit ? `(${variable.unit})` : ''}
+                    </Label>
+                    {variable.type === 'number' && (
+                      <Input
+                        id={variable.id}
+                        type="number"
+                        value={pricingInputs[variable.id] as number ?? ''}
+                        onChange={(e) => handleInputChange(variable.id, parseFloat(e.target.value) || 0)}
+                        placeholder={`Entrez ${variable.label.toLowerCase()}`}
+                        min="0"
+                        className="text-sm"
+                      />
+                    )}
+                    {variable.type === 'select' && variable.options && ( // Ensure options exist
+                      <Select
+                        value={pricingInputs[variable.id] as string ?? variable.defaultValue}
+                        onValueChange={(value) => handleInputChange(variable.id, value)}
+                      >
+                        <SelectTrigger id={variable.id} className="w-full text-sm">
+                          <SelectValue placeholder={`Sélectionnez ${variable.label.toLowerCase()}`} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {variable.options.map(option => (
+                            <SelectItem key={option} value={option} className="text-sm">{option}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                     {variable.type === 'boolean' && (
+                       <div className="flex items-center space-x-2 pt-1">
+                         <Checkbox
+                           id={variable.id}
+                           checked={pricingInputs[variable.id] as boolean ?? false}
+                           onCheckedChange={(checked) => handleInputChange(variable.id, !!checked)}
+                         />
+                         <Label htmlFor={variable.id} className="text-sm font-normal cursor-pointer">
+                           Activer
+                         </Label>
+                       </div>
+                     )}
+                  </div>
+                ))
+               ) : (
+                   <p className="text-sm text-muted-foreground text-center py-4">Aucune variable applicable aux tâches sélectionnées.</p>
+               )}
                  <div className="space-y-1 pt-2">
                     <Label htmlFor="discount" className="text-sm font-medium flex items-center gap-1">
                         <Percent className="w-4 h-4" /> Remise (%)
@@ -251,9 +351,9 @@ export default function QuoteGeneratorPage() {
                    )}
                    <ScrollArea className="h-[350px] border rounded-md">
                      <Table>
-                       <TableHeader className="sticky top-0 bg-secondary">
+                       <TableHeader className="sticky top-0 bg-secondary z-10">
                          <TableRow>
-                           <TableHead className="w-[60%]">Prestation / Tâche</TableHead>
+                           <TableHead className="w-[60%]">Tâche</TableHead>
                            {/* <TableHead>Qté</TableHead> */}
                            <TableHead className="text-right">Prix Unitaire HT</TableHead>
                            <TableHead className="text-right">Total HT</TableHead>
@@ -272,7 +372,7 @@ export default function QuoteGeneratorPage() {
                          ) : (
                            <TableRow>
                              <TableCell colSpan={3} className="text-center text-muted-foreground py-4">
-                               Aucune prestation chiffrée.
+                               Aucune tâche chiffrée.
                              </TableCell>
                            </TableRow>
                          )}
@@ -322,13 +422,13 @@ export default function QuoteGeneratorPage() {
               ) : (
                 <div className="text-center text-muted-foreground py-10">
                   <Calculator className="mx-auto h-12 w-12 mb-4 text-gray-400" />
-                  <p>Veuillez sélectionner des services et cliquer sur "Calculer le Devis".</p>
+                  <p>Veuillez sélectionner des tâches et cliquer sur "Calculer le Devis".</p>
                 </div>
               )}
             </CardContent>
              {generatedQuote && (
                 <CardFooter className="flex justify-end">
-                    {/* Add Export/Save functionality here */}
+                    {/* TODO: Add Export/Save functionality here */}
                     <Button variant="outline">Exporter le Devis (PDF)</Button>
                 </CardFooter>
              )}
